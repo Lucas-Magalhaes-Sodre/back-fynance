@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: minha-receita-backend
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run render:build
+    startCommand: npm run start:prod
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: WEB_ORIGIN
+        sync: false
+      - key: JWT_SECRET
+        sync: false

@@ -7,6 +7,8 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
+    "start:prod": "prisma migrate deploy && node dist/server.js",
+    "render:build": "prisma generate && npm run build",
     "typecheck": "tsc --noEmit",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
@@ -32,4 +34,3 @@
     "seed": "tsx prisma/seed.ts"
   }
 }
-

@@ -10,9 +10,10 @@ import { env } from './shared/env.js';
 
 export function buildApp() {
   const app = fastify({ logger: true });
+  const allowedOrigins = env.WEB_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean);
 
   app.register(cors, {
-    origin: [env.WEB_ORIGIN, 'http://localhost:19006', 'http://localhost:8081'],
+    origin: [...allowedOrigins, 'http://localhost:19006', 'http://localhost:8081'],
     credentials: true
   });
 
@@ -32,7 +33,7 @@ export function buildApp() {
     });
   });
 
-  app.get('/health', async () => ({ ok: true }));
+  app.get('/health', async () => ({ status: 'ok', message: 'Backend is running' }));
   app.register(authRoutes, { prefix: '/auth' });
   app.register(userRoutes, { prefix: '/users' });
   app.register(financialItemRoutes, { prefix: '/financial-items' });
