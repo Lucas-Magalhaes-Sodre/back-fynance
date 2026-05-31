@@ -1,0 +1,74 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum FinancialItemType {
+  INCOME
+  EXPENSE
+  FIXED_EXPENSE
+  EXTRA_EXPENSE
+  FIXED_INCOME
+  EXTRA_INCOME
+}
+
+enum RecurrenceType {
+  NONE
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+enum PaymentStatus {
+  PENDENTE
+  PAGO
+  ATRASADO
+}
+
+model User {
+  id            String          @id @default(uuid())
+  name          String
+  email         String          @unique
+  password_hash String
+  items         FinancialItem[]
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+}
+
+model FinancialItem {
+  id          String            @id @default(uuid())
+  userId      String
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  name        String
+  description String?
+  amount      Decimal           @db.Decimal(12, 2)
+  type        FinancialItemType
+  category    String
+  dueDate     DateTime?
+  paymentDate DateTime?
+  status      PaymentStatus     @default(PENDENTE)
+  dueDay      Int?
+  isFixed     Boolean           @default(false)
+  recurrenceType RecurrenceType @default(NONE)
+  recurrenceGroupId String?
+  date        DateTime
+  month       Int
+  year        Int
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([userId])
+  @@index([type])
+  @@index([status])
+  @@index([date])
+  @@index([recurrenceGroupId])
+  @@index([userId, year])
+  @@index([userId, year, month])
+  @@index([userId, date])
+}
