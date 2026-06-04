@@ -5,6 +5,7 @@ import { ZodError } from 'zod';
 import { authRoutes } from './modules/auth/auth.routes.js';
 import { financialControlRoutes, financialSummaryRoutes } from './modules/financial-control/financial-control.routes.js';
 import { financialItemRoutes } from './modules/financial-items/financial-item.routes.js';
+import { savingsRoutes } from './modules/savings/savings.routes.js';
 import { userRoutes } from './modules/users/user.routes.js';
 import { env } from './shared/env.js';
 
@@ -37,6 +38,7 @@ export function buildApp() {
   app.register(authRoutes, { prefix: '/auth' });
   app.register(userRoutes, { prefix: '/users' });
   app.register(financialItemRoutes, { prefix: '/financial-items' });
+  app.register(savingsRoutes, { prefix: '/savings' });
   app.register(financialControlRoutes, { prefix: '/financial-control' });
   app.register(financialSummaryRoutes, { prefix: '/financial-summary' });
 
