@@ -6,6 +6,7 @@ import { authRoutes } from './modules/auth/auth.routes.js';
 import { financialCalendarRoutes } from './modules/financial-calendar/financial-calendar.routes.js';
 import { financialControlRoutes, financialSummaryRoutes } from './modules/financial-control/financial-control.routes.js';
 import { financialGoalRoutes } from './modules/financial-goals/financial-goal.routes.js';
+import { financialInsightsRoutes } from './modules/financial-insights/financial-insights.routes.js';
 import { financialItemRoutes } from './modules/financial-items/financial-item.routes.js';
 import { savingsRoutes } from './modules/savings/savings.routes.js';
 import { userRoutes } from './modules/users/user.routes.js';
@@ -43,6 +44,7 @@ export function buildApp() {
   app.register(savingsRoutes, { prefix: '/savings' });
   app.register(financialCalendarRoutes, { prefix: '/financial-calendar' });
   app.register(financialGoalRoutes, { prefix: '/financial-goals' });
+  app.register(financialInsightsRoutes, { prefix: '/financial-insights' });
   app.register(financialControlRoutes, { prefix: '/financial-control' });
   app.register(financialSummaryRoutes, { prefix: '/financial-summary' });
 
