@@ -2,15 +2,19 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   createFinancialItemSchema,
+  categoryActionSchema,
   listFinancialItemsSchema,
+  renameCategorySchema,
   updateFinancialItemValueSchema,
   updateFinancialItemSchema
 } from './financial-item.schemas.js';
 import {
   createFinancialItem,
+  deleteFinancialCategory,
   deleteFinancialItem,
   getDashboard,
   listFinancialItems,
+  renameFinancialCategory,
   updateFinancialItem,
   updateFinancialItemValue
 } from './financial-item.service.js';
@@ -47,6 +51,18 @@ export async function deleteFinancialItemController(request: FastifyRequest, rep
   const { id } = idParamsSchema.parse(request.params);
   await deleteFinancialItem(request.user.sub, id);
   return reply.status(204).send();
+}
+
+export async function renameFinancialCategoryController(request: FastifyRequest, reply: FastifyReply) {
+  const data = renameCategorySchema.parse(request.body);
+  const result = await renameFinancialCategory(request.user.sub, data);
+  return reply.send(result);
+}
+
+export async function deleteFinancialCategoryController(request: FastifyRequest, reply: FastifyReply) {
+  const data = categoryActionSchema.parse(request.body);
+  const result = await deleteFinancialCategory(request.user.sub, data);
+  return reply.send(result);
 }
 
 export async function dashboardController(request: FastifyRequest, reply: FastifyReply) {

@@ -7,6 +7,14 @@ export const recurrenceTypeSchema = z.enum(['NONE', 'DAILY', 'WEEKLY', 'MONTHLY'
 export const paymentStatusSchema = z.enum(['PENDENTE', 'PAGO', 'ATRASADO']);
 export const valueUpdateScopeSchema = z.enum(['ONLY_THIS_PERIOD', 'FROM_THIS_PERIOD_FORWARD', 'ALL_YEAR']);
 export const periodTypeSchema = z.enum(['DAY', 'WEEK', 'MONTH', 'YEAR']);
+export const categoryActionSchema = z.object({
+  type: financialEntryTypeSchema,
+  category: z.string().min(1),
+  year: z.coerce.number().int().min(2000).max(2100).optional()
+});
+export const renameCategorySchema = categoryActionSchema.extend({
+  newCategory: z.string().min(1)
+});
 
 const financialItemBaseSchema = z.object({
   title: z.string().min(2).optional(),
@@ -52,3 +60,5 @@ export type CreateFinancialItemInput = z.infer<typeof createFinancialItemSchema>
 export type UpdateFinancialItemInput = z.infer<typeof updateFinancialItemSchema>;
 export type ListFinancialItemsInput = z.infer<typeof listFinancialItemsSchema>;
 export type UpdateFinancialItemValueInput = z.infer<typeof updateFinancialItemValueSchema>;
+export type CategoryActionInput = z.infer<typeof categoryActionSchema>;
+export type RenameCategoryInput = z.infer<typeof renameCategorySchema>;

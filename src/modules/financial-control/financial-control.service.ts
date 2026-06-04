@@ -1,6 +1,6 @@
 import { FinancialItemType, PaymentStatus, Prisma } from '@prisma/client';
 import { prisma } from '../../shared/prisma.js';
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES, MONTHS } from './financial-control.constants.js';
+import { MONTHS } from './financial-control.constants.js';
 
 type Item = Awaited<ReturnType<typeof prisma.financialItem.findMany>>[number];
 
@@ -47,20 +47,26 @@ function splitItems(items: Item[]) {
   };
 }
 
-function categoryRows(items: Item[], categories: string[], type: 'INCOME' | 'EXPENSE') {
-  const rows = categories.map((category) => ({
-    category,
-    type,
-    months: Object.fromEntries(MONTHS.map((month) => [month.value, 0])) as Record<number, number>,
-    total: 0
-  }));
-
-  const rowMap = new Map(rows.map((row) => [row.category, row]));
+function categoryRows(items: Item[], type: 'INCOME' | 'EXPENSE') {
+  const rowMap = new Map<string, {
+    category: string;
+    type: 'INCOME' | 'EXPENSE';
+    months: Record<number, number>;
+    total: number;
+  }>();
 
   for (const item of items) {
     const targetType = isIncome(item.type) ? 'INCOME' : 'EXPENSE';
     if (targetType !== type) continue;
-    const category = rowMap.has(item.category) ? item.category : 'Outros';
+    const category = item.category;
+    if (!rowMap.has(category)) {
+      rowMap.set(category, {
+        category,
+        type,
+        months: Object.fromEntries(MONTHS.map((month) => [month.value, 0])) as Record<number, number>,
+        total: 0
+      });
+    }
     const row = rowMap.get(category);
     if (!row) continue;
     const amount = toNumber(item.amount);
@@ -68,7 +74,7 @@ function categoryRows(items: Item[], categories: string[], type: 'INCOME' | 'EXP
     row.total += amount;
   }
 
-  return rows;
+  return Array.from(rowMap.values()).sort((a, b) => a.category.localeCompare(b.category, 'pt-BR'));
 }
 
 export async function getYearControl(userId: string, year: number) {
@@ -91,8 +97,8 @@ export async function getYearControl(userId: string, year: number) {
   return {
     year,
     months: MONTHS,
-    incomeRows: categoryRows(items, INCOME_CATEGORIES, 'INCOME'),
-    expenseRows: categoryRows(items, EXPENSE_CATEGORIES, 'EXPENSE'),
+    incomeRows: categoryRows(items, 'INCOME'),
+    expenseRows: categoryRows(items, 'EXPENSE'),
     monthlySummary,
     totals: {
       totalIncome,
@@ -102,7 +108,10 @@ export async function getYearControl(userId: string, year: number) {
       worstMonth
     },
     items: items.map(serializeItem),
-    categories: { incomes: INCOME_CATEGORIES, expenses: EXPENSE_CATEGORIES }
+    categories: {
+      incomes: Array.from(new Set(items.filter((item) => isIncome(item.type)).map((item) => item.category))).sort((a, b) => a.localeCompare(b, 'pt-BR')),
+      expenses: Array.from(new Set(items.filter((item) => isExpense(item.type)).map((item) => item.category))).sort((a, b) => a.localeCompare(b, 'pt-BR'))
+    }
   };
 }
 

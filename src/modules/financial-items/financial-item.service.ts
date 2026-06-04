@@ -2,7 +2,9 @@ import { FinancialItemType, PaymentStatus, Prisma, RecurrenceType } from '@prism
 import { prisma } from '../../shared/prisma.js';
 import type {
   CreateFinancialItemInput,
+  CategoryActionInput,
   ListFinancialItemsInput,
+  RenameCategoryInput,
   UpdateFinancialItemValueInput,
   UpdateFinancialItemInput
 } from './financial-item.schemas.js';
@@ -44,6 +46,12 @@ function normalizeType(type: CreateFinancialItemInput['type'] | UpdateFinancialI
 
 function isExpenseType(type: FinancialItemType | undefined) {
   return type === FinancialItemType.EXPENSE || type === FinancialItemType.FIXED_EXPENSE || type === FinancialItemType.EXTRA_EXPENSE;
+}
+
+function typeFilter(type: 'INCOME' | 'EXPENSE') {
+  return type === 'INCOME'
+    ? [FinancialItemType.INCOME, FinancialItemType.FIXED_INCOME, FinancialItemType.EXTRA_INCOME]
+    : [FinancialItemType.EXPENSE, FinancialItemType.FIXED_EXPENSE, FinancialItemType.EXTRA_EXPENSE];
 }
 
 function normalizeStatus(type: FinancialItemType, dueDate?: Date | null, paymentDate?: Date | null, status?: PaymentStatus) {
@@ -163,6 +171,34 @@ export async function deleteFinancialItem(userId: string, id: string) {
   }
 
   await prisma.financialItem.delete({ where: { id } });
+}
+
+export async function renameFinancialCategory(userId: string, input: RenameCategoryInput) {
+  const where: Prisma.FinancialItemWhereInput = {
+    userId,
+    category: input.category,
+    type: { in: typeFilter(input.type) },
+    year: input.year
+  };
+
+  const result = await prisma.financialItem.updateMany({
+    where,
+    data: { category: input.newCategory }
+  });
+
+  return { updatedCount: result.count };
+}
+
+export async function deleteFinancialCategory(userId: string, input: CategoryActionInput) {
+  const where: Prisma.FinancialItemWhereInput = {
+    userId,
+    category: input.category,
+    type: { in: typeFilter(input.type) },
+    year: input.year
+  };
+
+  const result = await prisma.financialItem.deleteMany({ where });
+  return { deletedCount: result.count };
 }
 
 export async function getDashboard(userId: string) {
