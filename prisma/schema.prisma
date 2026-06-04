@@ -32,6 +32,12 @@ enum PaymentStatus {
   CANCELADO
 }
 
+enum FinancialGoalStatus {
+  ACTIVE
+  COMPLETED
+  CANCELED
+}
+
 model User {
   id            String          @id @default(uuid())
   name          String
@@ -39,6 +45,7 @@ model User {
   password_hash String
   items         FinancialItem[]
   savings       Savings[]
+  goals         FinancialGoal[]
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
 }
@@ -54,6 +61,7 @@ model Savings {
   month       Int
   year        Int
   goalId      String?
+  goal        FinancialGoal? @relation(fields: [goalId], references: [id], onDelete: SetNull)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -63,6 +71,28 @@ model Savings {
   @@index([userId, year])
   @@index([userId, year, month])
   @@index([userId, date])
+}
+
+model FinancialGoal {
+  id            String              @id @default(uuid())
+  userId        String
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title         String
+  description   String?
+  targetAmount  Decimal             @db.Decimal(12, 2)
+  currentAmount Decimal             @default(0) @db.Decimal(12, 2)
+  startDate     DateTime
+  targetDate    DateTime?
+  category      String?
+  status        FinancialGoalStatus @default(ACTIVE)
+  savings       Savings[]
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([targetDate])
+  @@index([userId, status])
 }
 
 model FinancialItem {
