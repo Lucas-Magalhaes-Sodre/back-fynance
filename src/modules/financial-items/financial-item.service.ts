@@ -4,6 +4,8 @@ import type {
   CreateFinancialItemInput,
   CategoryActionInput,
   ListFinancialItemsInput,
+  PaymentSummaryInput,
+  PaymentStatusUpdateInput,
   RenameCategoryInput,
   UpdateFinancialItemValueInput,
   UpdateFinancialItemInput
@@ -35,7 +37,7 @@ function serializeItem(item: {
   createdAt: Date;
   updatedAt: Date;
 }) {
-  return { ...item, amount: toNumber(item.amount) };
+  return { ...item, amount: toNumber(item.amount), status: currentStatus(item) };
 }
 
 function normalizeType(type: CreateFinancialItemInput['type'] | UpdateFinancialItemInput['type']) {
@@ -55,6 +57,7 @@ function typeFilter(type: 'INCOME' | 'EXPENSE') {
 }
 
 function normalizeStatus(type: FinancialItemType, dueDate?: Date | null, paymentDate?: Date | null, status?: PaymentStatus) {
+  if (status === PaymentStatus.CANCELADO) return PaymentStatus.CANCELADO;
   if (!isExpenseType(type)) return PaymentStatus.PAGO;
   if (paymentDate || status === PaymentStatus.PAGO) return PaymentStatus.PAGO;
   if (dueDate) {
@@ -65,6 +68,15 @@ function normalizeStatus(type: FinancialItemType, dueDate?: Date | null, payment
     if (due < today) return PaymentStatus.ATRASADO;
   }
   return status ?? PaymentStatus.PENDENTE;
+}
+
+function currentStatus(item: {
+  type: FinancialItemType;
+  dueDate: Date | null;
+  paymentDate: Date | null;
+  status: PaymentStatus;
+}) {
+  return normalizeStatus(item.type, item.dueDate, item.paymentDate, item.status);
 }
 
 function inferCategory(input: CreateFinancialItemInput | UpdateFinancialItemInput) {
@@ -106,6 +118,7 @@ export async function listFinancialItems(userId: string, filters: ListFinancialI
   const where: Prisma.FinancialItemWhereInput = {
     userId,
     type: filters.type,
+    status: filters.status && filters.status !== PaymentStatus.ATRASADO ? filters.status : undefined,
     date: {
       gte: filters.startDate,
       lte: filters.endDate
@@ -117,7 +130,10 @@ export async function listFinancialItems(userId: string, filters: ListFinancialI
     orderBy: [{ date: 'desc' }, { createdAt: 'desc' }]
   });
 
-  return items.map(serializeItem);
+  const serializedItems = items.map(serializeItem);
+  if (!filters.status || filters.status !== PaymentStatus.ATRASADO) return serializedItems;
+
+  return serializedItems.filter((item) => item.status === PaymentStatus.ATRASADO);
 }
 
 export async function createFinancialItem(userId: string, input: CreateFinancialItemInput) {
@@ -156,6 +172,29 @@ export async function updateFinancialItem(userId: string, id: string, input: Upd
       dueDay: input.dueDay ?? (input.dueDate ? input.dueDate.getDate() : undefined),
       month: input.month ?? (input.date ? input.date.getMonth() + 1 : undefined),
       year: input.year ?? (input.date ? input.date.getFullYear() : undefined)
+    }
+  });
+
+  return serializeItem(item);
+}
+
+export async function updateFinancialItemPaymentStatus(userId: string, id: string, input: PaymentStatusUpdateInput) {
+  const existing = await prisma.financialItem.findFirst({ where: { id, userId } });
+  if (!existing) {
+    const error = new Error('Registro financeiro nao encontrado') as Error & { statusCode: number };
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const paymentDate = input.status === PaymentStatus.PAGO
+    ? input.paymentDate ?? input.paidAt ?? existing.paymentDate ?? new Date()
+    : null;
+
+  const item = await prisma.financialItem.update({
+    where: { id },
+    data: {
+      status: input.status,
+      paymentDate
     }
   });
 
@@ -230,6 +269,57 @@ export async function getDashboard(userId: string) {
   totals.finalBalance = totals.totalIncomes - totals.totalExpenses;
 
   return { totals, recentItems: items.slice(0, 8).map(serializeItem) };
+}
+
+export async function getPaymentSummary(userId: string, filters: PaymentSummaryInput) {
+  const items = await prisma.financialItem.findMany({
+    where: {
+      userId,
+      type: { in: typeFilter('EXPENSE') },
+      month: filters.month,
+      year: filters.year,
+      date: {
+        gte: filters.startDate,
+        lte: filters.endDate
+      }
+    }
+  });
+
+  const summary = {
+    paidCount: 0,
+    pendingCount: 0,
+    overdueCount: 0,
+    canceledCount: 0,
+    paidTotal: 0,
+    pendingTotal: 0,
+    overdueTotal: 0
+  };
+
+  for (const item of items) {
+    const amount = toNumber(item.amount);
+    const status = currentStatus(item);
+
+    if (status === PaymentStatus.PAGO) {
+      summary.paidCount += 1;
+      summary.paidTotal += amount;
+    }
+
+    if (status === PaymentStatus.PENDENTE) {
+      summary.pendingCount += 1;
+      summary.pendingTotal += amount;
+    }
+
+    if (status === PaymentStatus.ATRASADO) {
+      summary.overdueCount += 1;
+      summary.overdueTotal += amount;
+    }
+
+    if (status === PaymentStatus.CANCELADO) {
+      summary.canceledCount += 1;
+    }
+  }
+
+  return summary;
 }
 
 export async function updateFinancialItemValue(userId: string, id: string, input: UpdateFinancialItemValueInput) {

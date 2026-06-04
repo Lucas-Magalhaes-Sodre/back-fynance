@@ -6,8 +6,10 @@ import {
   deleteFinancialCategoryController,
   deleteFinancialItemController,
   listFinancialItemsController,
+  paymentSummaryController,
   renameFinancialCategoryController,
   updateFinancialItemController,
+  updateFinancialItemPaymentStatusController,
   updateFinancialItemValueController
 } from './financial-item.controller.js';
 
@@ -18,6 +20,8 @@ export async function financialItemRoutes(app: FastifyInstance) {
   app.post('/', createFinancialItemController);
   app.patch('/category', renameFinancialCategoryController);
   app.delete('/category', deleteFinancialCategoryController);
+  app.get('/payment-summary', paymentSummaryController);
+  app.patch('/:id/payment-status', updateFinancialItemPaymentStatusController);
   app.patch('/:id/value', updateFinancialItemValueController);
   app.put('/:id', updateFinancialItemController);
   app.delete('/:id', deleteFinancialItemController);

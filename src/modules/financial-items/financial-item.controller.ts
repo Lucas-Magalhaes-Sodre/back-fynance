@@ -4,6 +4,8 @@ import {
   createFinancialItemSchema,
   categoryActionSchema,
   listFinancialItemsSchema,
+  paymentStatusUpdateSchema,
+  paymentSummarySchema,
   renameCategorySchema,
   updateFinancialItemValueSchema,
   updateFinancialItemSchema
@@ -13,9 +15,11 @@ import {
   deleteFinancialCategory,
   deleteFinancialItem,
   getDashboard,
+  getPaymentSummary,
   listFinancialItems,
   renameFinancialCategory,
   updateFinancialItem,
+  updateFinancialItemPaymentStatus,
   updateFinancialItemValue
 } from './financial-item.service.js';
 
@@ -37,6 +41,13 @@ export async function updateFinancialItemController(request: FastifyRequest, rep
   const { id } = idParamsSchema.parse(request.params);
   const data = updateFinancialItemSchema.parse(request.body);
   const item = await updateFinancialItem(request.user.sub, id, data);
+  return reply.send({ item });
+}
+
+export async function updateFinancialItemPaymentStatusController(request: FastifyRequest, reply: FastifyReply) {
+  const { id } = idParamsSchema.parse(request.params);
+  const data = paymentStatusUpdateSchema.parse(request.body);
+  const item = await updateFinancialItemPaymentStatus(request.user.sub, id, data);
   return reply.send({ item });
 }
 
@@ -68,4 +79,10 @@ export async function deleteFinancialCategoryController(request: FastifyRequest,
 export async function dashboardController(request: FastifyRequest, reply: FastifyReply) {
   const dashboard = await getDashboard(request.user.sub);
   return reply.send(dashboard);
+}
+
+export async function paymentSummaryController(request: FastifyRequest, reply: FastifyReply) {
+  const filters = paymentSummarySchema.parse(request.query);
+  const summary = await getPaymentSummary(request.user.sub, filters);
+  return reply.send({ summary });
 }

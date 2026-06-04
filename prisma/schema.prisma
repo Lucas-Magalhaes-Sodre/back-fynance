@@ -29,6 +29,7 @@ enum PaymentStatus {
   PENDENTE
   PAGO
   ATRASADO
+  CANCELADO
 }
 
 model User {
