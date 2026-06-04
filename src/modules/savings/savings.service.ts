@@ -47,6 +47,17 @@ function expenseTypes(): FinancialItemType[] {
   return [FinancialItemType.EXPENSE, FinancialItemType.FIXED_EXPENSE, FinancialItemType.EXTRA_EXPENSE];
 }
 
+async function assertGoalOwnership(userId: string, goalId?: string | null) {
+  if (!goalId) return;
+
+  const goal = await prisma.financialGoal.findFirst({ where: { id: goalId, userId } });
+  if (!goal) {
+    const error = new Error('Meta financeira nao encontrada') as Error & { statusCode: number };
+    error.statusCode = 404;
+    throw error;
+  }
+}
+
 export async function listSavings(userId: string, filters: ListSavingsInput) {
   const savings = await prisma.savings.findMany({
     where: {
@@ -66,6 +77,8 @@ export async function listSavings(userId: string, filters: ListSavingsInput) {
 }
 
 export async function createSaving(userId: string, input: CreateSavingInput) {
+  await assertGoalOwnership(userId, input.goalId);
+
   const saving = await prisma.savings.create({
     data: {
       userId,
@@ -83,6 +96,8 @@ export async function updateSaving(userId: string, id: string, input: UpdateSavi
     error.statusCode = 404;
     throw error;
   }
+
+  await assertGoalOwnership(userId, input.goalId);
 
   const saving = await prisma.savings.update({
     where: { id },
