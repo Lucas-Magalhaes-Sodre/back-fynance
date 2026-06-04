@@ -4,6 +4,7 @@ import fastify from 'fastify';
 import { ZodError } from 'zod';
 import { authRoutes } from './modules/auth/auth.routes.js';
 import { financialCalendarRoutes } from './modules/financial-calendar/financial-calendar.routes.js';
+import { financialComparisonRoutes } from './modules/financial-comparison/financial-comparison.routes.js';
 import { financialControlRoutes, financialSummaryRoutes } from './modules/financial-control/financial-control.routes.js';
 import { financialGoalRoutes } from './modules/financial-goals/financial-goal.routes.js';
 import { financialInsightsRoutes } from './modules/financial-insights/financial-insights.routes.js';
@@ -43,6 +44,7 @@ export function buildApp() {
   app.register(financialItemRoutes, { prefix: '/financial-items' });
   app.register(savingsRoutes, { prefix: '/savings' });
   app.register(financialCalendarRoutes, { prefix: '/financial-calendar' });
+  app.register(financialComparisonRoutes, { prefix: '/financial-comparison' });
   app.register(financialGoalRoutes, { prefix: '/financial-goals' });
   app.register(financialInsightsRoutes, { prefix: '/financial-insights' });
   app.register(financialControlRoutes, { prefix: '/financial-control' });
