@@ -9,11 +9,11 @@ function toNumber(value: Prisma.Decimal | number) {
 }
 
 function isIncome(type: FinancialItemType) {
-  return type === FinancialItemType.INCOME || type === FinancialItemType.FIXED_INCOME || type === FinancialItemType.EXTRA_INCOME;
+  return type === FinancialItemType.INCOME;
 }
 
 function isExpense(type: FinancialItemType) {
-  return type === FinancialItemType.EXPENSE || type === FinancialItemType.FIXED_EXPENSE || type === FinancialItemType.EXTRA_EXPENSE;
+  return type === FinancialItemType.EXPENSE;
 }
 
 function previousMonth(month: number, year: number) {
@@ -28,18 +28,41 @@ function variation(current: number, previous: number) {
   };
 }
 
-function summarize(items: Item[], savings: number) {
+function summarize(items: Item[], savings: number, savingsOut: number) {
   const income = items.filter((item) => isIncome(item.type)).reduce((sum, item) => sum + toNumber(item.amount), 0);
   const expense = items.filter((item) => isExpense(item.type)).reduce((sum, item) => sum + toNumber(item.amount), 0);
-  return { income, expense, savings, balance: income - expense };
+  return { income, expense, savings, balance: income - expense - savingsOut };
 }
 
-async function savingsTotal(userId: string, month: number, year: number) {
-  const result = await prisma.savings.aggregate({
-    where: { userId, month, year },
-    _sum: { amount: true }
-  });
-  return toNumber(result._sum.amount ?? 0);
+async function savingsTotals(userId: string, month: number, year: number) {
+  const [net, out] = await Promise.all([
+    prisma.savings.aggregate({
+      where: { userId, month, year },
+      _sum: { amount: true }
+    }),
+    prisma.savings.aggregate({
+      where: { userId, month, year, amount: { gt: 0 } },
+      _sum: { amount: true }
+    })
+  ]);
+  return {
+    net: toNumber(net._sum.amount ?? 0),
+    out: toNumber(out._sum.amount ?? 0)
+  };
+}
+
+function monthSavingsTotals(savings: { month: number; amount: Prisma.Decimal }[], month: number) {
+  return savings
+    .filter((saving) => saving.month === month)
+    .reduce(
+      (totals, saving) => {
+        const amount = toNumber(saving.amount);
+        totals.net += amount;
+        if (amount > 0) totals.out += amount;
+        return totals;
+      },
+      { net: 0, out: 0 }
+    );
 }
 
 export async function getFinancialComparison(userId: string, month: number, year: number) {
@@ -48,23 +71,21 @@ export async function getFinancialComparison(userId: string, month: number, year
     prisma.financialItem.findMany({ where: { userId, month, year } }),
     prisma.financialItem.findMany({ where: { userId, month: previous.month, year: previous.year } }),
     prisma.financialItem.findMany({ where: { userId, year } }),
-    savingsTotal(userId, month, year),
-    savingsTotal(userId, previous.month, previous.year),
-    prisma.savings.findMany({ where: { userId, year } })
+    savingsTotals(userId, month, year),
+    savingsTotals(userId, previous.month, previous.year),
+    prisma.savings.findMany({ where: { userId, year }, select: { month: true, amount: true } })
   ]);
 
-  const currentMonth = summarize(currentItems, currentSavings);
-  const previousMonthSummary = summarize(previousItems, previousSavings);
+  const currentMonth = summarize(currentItems, currentSavings.net, currentSavings.out);
+  const previousMonthSummary = summarize(previousItems, previousSavings.net, previousSavings.out);
 
   const monthlyEvolution = MONTHS.map((monthItem) => {
     const monthItems = yearItems.filter((item) => item.month === monthItem.value);
-    const savings = yearSavings
-      .filter((saving) => saving.month === monthItem.value)
-      .reduce((sum, saving) => sum + toNumber(saving.amount), 0);
+    const savings = monthSavingsTotals(yearSavings, monthItem.value);
     return {
       month: monthItem.value,
       label: monthItem.label,
-      ...summarize(monthItems, savings)
+      ...summarize(monthItems, savings.net, savings.out)
     };
   });
 

@@ -44,10 +44,27 @@ model User {
   email         String          @unique
   password_hash String
   items         FinancialItem[]
+  categories    FinancialCategory[]
   savings       Savings[]
   goals         FinancialGoal[]
+  financialCategoriesInitialized Boolean @default(false)
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
+}
+
+model FinancialCategory {
+  id        String            @id @default(uuid())
+  userId    String
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  type      FinancialItemType
+  color     String            @default("#64748B")
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@unique([userId, type, name])
+  @@index([userId])
+  @@index([type])
 }
 
 model Savings {

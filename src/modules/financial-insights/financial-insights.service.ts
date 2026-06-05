@@ -19,11 +19,11 @@ function toNumber(value: Prisma.Decimal | number) {
 }
 
 function isIncome(type: FinancialItemType) {
-  return type === FinancialItemType.INCOME || type === FinancialItemType.FIXED_INCOME || type === FinancialItemType.EXTRA_INCOME;
+  return type === FinancialItemType.INCOME;
 }
 
 function isExpense(type: FinancialItemType) {
-  return type === FinancialItemType.EXPENSE || type === FinancialItemType.FIXED_EXPENSE || type === FinancialItemType.EXTRA_EXPENSE;
+  return type === FinancialItemType.EXPENSE;
 }
 
 function currentStatus(item: Pick<Item, 'type' | 'dueDate' | 'paymentDate' | 'status'>) {
@@ -64,16 +64,18 @@ export async function getFinancialInsights(userId: string, month: number, year: 
   const sevenDaysFromNow = new Date(now);
   sevenDaysFromNow.setDate(now.getDate() + 7);
 
-  const [currentItems, previousItems, savings] = await Promise.all([
+  const [currentItems, previousItems, savings, savedOut] = await Promise.all([
     prisma.financialItem.findMany({ where: { userId, month, year } }),
     prisma.financialItem.findMany({ where: { userId, month: previous.month, year: previous.year } }),
-    prisma.savings.aggregate({ where: { userId, month, year }, _sum: { amount: true } })
+    prisma.savings.aggregate({ where: { userId, month, year }, _sum: { amount: true } }),
+    prisma.savings.aggregate({ where: { userId, month, year, amount: { gt: 0 } }, _sum: { amount: true } })
   ]);
 
   const currentTotals = totals(currentItems);
   const previousTotals = totals(previousItems);
   const expenseVariation = percentageVariation(currentTotals.expense, previousTotals.expense);
   const monthlySavings = toNumber(savings._sum.amount ?? 0);
+  const availableBalance = currentTotals.balance - toNumber(savedOut._sum.amount ?? 0);
   const expenses = currentItems.filter((item) => isExpense(item.type));
   const overdueBills = expenses.filter((item) => currentStatus(item) === PaymentStatus.ATRASADO);
   const upcomingPendingBills = expenses.filter((item) => {
@@ -89,12 +91,12 @@ export async function getFinancialInsights(userId: string, month: number, year: 
 
   const insights: Insight[] = [
     {
-      type: currentTotals.balance >= 0 ? 'POSITIVE' : 'NEGATIVE',
-      title: currentTotals.balance >= 0 ? 'Saldo positivo no mes' : 'Saldo negativo no mes',
-      description: currentTotals.balance >= 0
-        ? 'Suas receitas cobrem as despesas deste periodo.'
-        : 'Suas despesas ultrapassaram as receitas deste periodo.',
-      value: currentTotals.balance
+      type: availableBalance >= 0 ? 'POSITIVE' : 'NEGATIVE',
+      title: availableBalance >= 0 ? 'Saldo disponivel positivo no mes' : 'Saldo disponivel negativo no mes',
+      description: availableBalance >= 0
+        ? 'Suas receitas cobrem as despesas e economias/investimentos deste periodo.'
+        : 'Suas despesas e economias/investimentos ultrapassaram as receitas deste periodo.',
+      value: availableBalance
     },
     {
       type: expenseVariation > 10 ? 'WARNING' : 'INFO',
@@ -104,12 +106,12 @@ export async function getFinancialInsights(userId: string, month: number, year: 
     },
     {
       type: monthlySavings > 0 ? 'POSITIVE' : 'INFO',
-      title: 'Economia registrada',
+      title: 'Economias/investimentos registrados',
       description: monthlySavings > 0
-        ? 'Voce registrou dinheiro guardado neste mes.'
-        : 'Ainda nao ha economia registrada neste mes.',
+        ? 'Voce registrou dinheiro guardado ou investido neste mes.'
+        : 'Ainda nao ha economia/investimento registrada neste mes.',
       value: monthlySavings,
-      actionLabel: 'Ver economias',
+      actionLabel: 'Ver economias/invest.',
       actionTarget: '/app/savings'
     },
     {

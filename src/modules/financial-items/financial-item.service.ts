@@ -41,19 +41,19 @@ function serializeItem(item: {
 }
 
 function normalizeType(type: CreateFinancialItemInput['type'] | UpdateFinancialItemInput['type']) {
-  if (type === FinancialItemType.FIXED_INCOME || type === FinancialItemType.EXTRA_INCOME) return FinancialItemType.INCOME;
-  if (type === FinancialItemType.FIXED_EXPENSE || type === FinancialItemType.EXTRA_EXPENSE) return FinancialItemType.EXPENSE;
-  return type;
+  if (type === FinancialItemType.INCOME) return FinancialItemType.INCOME;
+  if (type === FinancialItemType.EXPENSE) return FinancialItemType.EXPENSE;
+  return undefined;
 }
 
 function isExpenseType(type: FinancialItemType | undefined) {
-  return type === FinancialItemType.EXPENSE || type === FinancialItemType.FIXED_EXPENSE || type === FinancialItemType.EXTRA_EXPENSE;
+  return type === FinancialItemType.EXPENSE;
 }
 
 function typeFilter(type: 'INCOME' | 'EXPENSE') {
   return type === 'INCOME'
-    ? [FinancialItemType.INCOME, FinancialItemType.FIXED_INCOME, FinancialItemType.EXTRA_INCOME]
-    : [FinancialItemType.EXPENSE, FinancialItemType.FIXED_EXPENSE, FinancialItemType.EXTRA_EXPENSE];
+    ? [FinancialItemType.INCOME]
+    : [FinancialItemType.EXPENSE];
 }
 
 function normalizeStatus(type: FinancialItemType, dueDate?: Date | null, paymentDate?: Date | null, status?: PaymentStatus) {
@@ -81,10 +81,6 @@ function currentStatus(item: {
 
 function inferCategory(input: CreateFinancialItemInput | UpdateFinancialItemInput) {
   if (input.category) return input.category;
-  if (input.type === FinancialItemType.FIXED_INCOME) return 'Receitas fixas';
-  if (input.type === FinancialItemType.EXTRA_INCOME) return 'Receitas extras';
-  if (input.type === FinancialItemType.FIXED_EXPENSE) return 'Despesas fixas';
-  if (input.type === FinancialItemType.EXTRA_EXPENSE) return 'Despesas extras';
   return 'Outros';
 }
 
@@ -92,7 +88,7 @@ function normalizeWriteInput(input: CreateFinancialItemInput) {
   const date = input.date;
   const type = normalizeType(input.type) ?? FinancialItemType.EXPENSE;
   const name = input.name ?? input.title ?? 'Lancamento';
-  const isFixed = input.isFixed ?? (input.type === FinancialItemType.FIXED_INCOME || input.type === FinancialItemType.FIXED_EXPENSE);
+  const isFixed = input.isFixed ?? false;
 
   return {
     title: input.title ?? name,
@@ -241,32 +237,35 @@ export async function deleteFinancialCategory(userId: string, input: CategoryAct
 }
 
 export async function getDashboard(userId: string) {
-  const items = await prisma.financialItem.findMany({
-    where: { userId },
-    orderBy: [{ date: 'desc' }, { createdAt: 'desc' }]
-  });
+  const [items, savingsTotal, savingsOut] = await Promise.all([
+    prisma.financialItem.findMany({
+      where: { userId },
+      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }]
+    }),
+    prisma.savings.aggregate({
+      where: { userId },
+      _sum: { amount: true }
+    }),
+    prisma.savings.aggregate({
+      where: { userId, amount: { gt: 0 } },
+      _sum: { amount: true }
+    })
+  ]);
 
   const totals = {
-    fixedExpenses: 0,
-    extraExpenses: 0,
-    fixedIncomes: 0,
-    extraIncomes: 0,
     totalIncomes: 0,
     totalExpenses: 0,
+    totalSavings: toNumber(savingsTotal._sum.amount ?? 0),
     finalBalance: 0
   };
 
   for (const item of items) {
     const amount = toNumber(item.amount);
-    if (item.type === FinancialItemType.FIXED_EXPENSE) totals.fixedExpenses += amount;
-    if (item.type === FinancialItemType.EXTRA_EXPENSE || item.type === FinancialItemType.EXPENSE) totals.extraExpenses += amount;
-    if (item.type === FinancialItemType.FIXED_INCOME) totals.fixedIncomes += amount;
-    if (item.type === FinancialItemType.EXTRA_INCOME || item.type === FinancialItemType.INCOME) totals.extraIncomes += amount;
+    if (!isExpenseType(item.type)) totals.totalIncomes += amount;
+    if (isExpenseType(item.type)) totals.totalExpenses += amount;
   }
 
-  totals.totalIncomes = totals.fixedIncomes + totals.extraIncomes;
-  totals.totalExpenses = totals.fixedExpenses + totals.extraExpenses;
-  totals.finalBalance = totals.totalIncomes - totals.totalExpenses;
+  totals.finalBalance = totals.totalIncomes - totals.totalExpenses - toNumber(savingsOut._sum.amount ?? 0);
 
   return { totals, recentItems: items.slice(0, 8).map(serializeItem) };
 }
@@ -361,10 +360,10 @@ export async function updateFinancialItemValue(userId: string, id: string, input
 
   const summarize = (items: typeof yearItems) => {
     const totalIncome = items
-      .filter((item) => item.type === FinancialItemType.INCOME || item.type === FinancialItemType.FIXED_INCOME || item.type === FinancialItemType.EXTRA_INCOME)
+      .filter((item) => item.type === FinancialItemType.INCOME)
       .reduce((sum, item) => sum + toNumber(item.amount), 0);
     const totalExpense = items
-      .filter((item) => item.type === FinancialItemType.EXPENSE || item.type === FinancialItemType.FIXED_EXPENSE || item.type === FinancialItemType.EXTRA_EXPENSE)
+      .filter((item) => item.type === FinancialItemType.EXPENSE)
       .reduce((sum, item) => sum + toNumber(item.amount), 0);
     return { totalIncome, totalExpense, balance: totalIncome - totalExpense };
   };

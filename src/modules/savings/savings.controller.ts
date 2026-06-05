@@ -4,6 +4,7 @@ import {
   createSavingSchema,
   listSavingsSchema,
   savingsSummarySchema,
+  savingsTransferSchema,
   updateSavingSchema
 } from './savings.schemas.js';
 import {
@@ -11,6 +12,7 @@ import {
   deleteSaving,
   getSavingsSummary,
   listSavings,
+  transferSavings,
   updateSaving
 } from './savings.service.js';
 
@@ -45,4 +47,10 @@ export async function savingsSummaryController(request: FastifyRequest, reply: F
   const filters = savingsSummarySchema.parse(request.query);
   const summary = await getSavingsSummary(request.user.sub, filters);
   return reply.send({ summary });
+}
+
+export async function savingsTransferController(request: FastifyRequest, reply: FastifyReply) {
+  const data = savingsTransferSchema.parse(request.body);
+  const result = await transferSavings(request.user.sub, data);
+  return reply.status(201).send(result);
 }

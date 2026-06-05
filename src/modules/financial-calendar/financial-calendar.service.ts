@@ -47,11 +47,11 @@ function dateKey(date: Date) {
 }
 
 function isIncome(type: FinancialItemType) {
-  return type === FinancialItemType.INCOME || type === FinancialItemType.FIXED_INCOME || type === FinancialItemType.EXTRA_INCOME;
+  return type === FinancialItemType.INCOME;
 }
 
 function isExpense(type: FinancialItemType) {
-  return type === FinancialItemType.EXPENSE || type === FinancialItemType.FIXED_EXPENSE || type === FinancialItemType.EXTRA_EXPENSE;
+  return type === FinancialItemType.EXPENSE;
 }
 
 function currentStatus(item: Pick<CalendarItem, 'type' | 'dueDate' | 'paymentDate' | 'status'>) {
@@ -103,6 +103,7 @@ export async function getFinancialCalendar(userId: string, month: number, year: 
     const incomes = dayItems.filter((item) => isIncome(item.type)).reduce((sum, item) => sum + item.amount, 0);
     const expenses = dayItems.filter((item) => isExpense(item.type)).reduce((sum, item) => sum + item.amount, 0);
     const savingTotal = daySavings.reduce((sum, saving) => sum + saving.amount, 0);
+    const savedOut = daySavings.reduce((sum, saving) => (saving.amount > 0 ? sum + saving.amount : sum), 0);
     const pendingBills = dayItems.filter((item) => isExpense(item.type) && item.status === PaymentStatus.PENDENTE);
     const overdueBills = dayItems.filter((item) => isExpense(item.type) && item.status === PaymentStatus.ATRASADO);
 
@@ -113,7 +114,7 @@ export async function getFinancialCalendar(userId: string, month: number, year: 
       savings: savingTotal,
       pendingBills: pendingBills.length,
       overdueBills: overdueBills.length,
-      balance: incomes - expenses,
+      balance: incomes - expenses - savedOut,
       items: dayItems,
       savingItems: daySavings
     };

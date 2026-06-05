@@ -1,7 +1,5 @@
-import { FinancialItemType } from '@prisma/client';
 import { z } from 'zod';
 
-export const legacyFinancialItemTypeSchema = z.nativeEnum(FinancialItemType);
 export const financialEntryTypeSchema = z.enum(['INCOME', 'EXPENSE']);
 export const recurrenceTypeSchema = z.enum(['NONE', 'DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY']);
 export const paymentStatusSchema = z.enum(['PENDENTE', 'PAGO', 'ATRASADO', 'CANCELADO']);
@@ -21,7 +19,7 @@ const financialItemBaseSchema = z.object({
   name: z.string().min(2).optional(),
   description: z.string().optional().nullable(),
   amount: z.coerce.number().positive(),
-  type: z.union([financialEntryTypeSchema, legacyFinancialItemTypeSchema]),
+  type: financialEntryTypeSchema,
   category: z.string().min(2).optional(),
   month: z.coerce.number().int().min(1).max(12).optional(),
   year: z.coerce.number().int().min(2000).max(2100).optional(),
@@ -64,7 +62,7 @@ export const createFinancialItemSchema = financialItemBaseSchema.refine((data) =
 export const updateFinancialItemSchema = financialItemBaseSchema.partial();
 
 export const listFinancialItemsSchema = z.object({
-  type: z.union([financialEntryTypeSchema, legacyFinancialItemTypeSchema]).optional(),
+  type: financialEntryTypeSchema.optional(),
   status: paymentStatusSchema.optional(),
   startDate: z.coerce.date().optional(),
   endDate: z.coerce.date().optional()

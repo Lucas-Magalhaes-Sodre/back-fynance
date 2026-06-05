@@ -12,27 +12,3 @@ export const MONTHS = [
   { value: 11, label: 'novembro' },
   { value: 12, label: 'dezembro' }
 ] as const;
-
-export const INCOME_CATEGORIES = ['Salario 1', 'Salario 2', 'Investimentos', 'Salario extra', 'Outros'];
-
-export const EXPENSE_CATEGORIES = [
-  'Parcela carro',
-  'Parcela casa',
-  'Parcela construtora',
-  'IPTU',
-  'Licenciamento',
-  'IPVA',
-  'Conta de agua',
-  'Conta de energia',
-  'Conta de internet',
-  'Cartoes',
-  'Faculdade',
-  'Farmacia',
-  'Gasolina',
-  'Imposto de renda',
-  'Pix ou dinheiro',
-  'Entrada FIPE',
-  'Investimento/Aposentadoria',
-  'Outros'
-];
-
