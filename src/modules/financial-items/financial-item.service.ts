@@ -4,6 +4,8 @@ import type {
   CreateFinancialItemInput,
   CategoryActionInput,
   ListFinancialItemsInput,
+  PaymentSummaryInput,
+  PaymentStatusUpdateInput,
   RenameCategoryInput,
   UpdateFinancialItemValueInput,
   UpdateFinancialItemInput
@@ -35,26 +37,27 @@ function serializeItem(item: {
   createdAt: Date;
   updatedAt: Date;
 }) {
-  return { ...item, amount: toNumber(item.amount) };
+  return { ...item, amount: toNumber(item.amount), status: currentStatus(item) };
 }
 
 function normalizeType(type: CreateFinancialItemInput['type'] | UpdateFinancialItemInput['type']) {
-  if (type === FinancialItemType.FIXED_INCOME || type === FinancialItemType.EXTRA_INCOME) return FinancialItemType.INCOME;
-  if (type === FinancialItemType.FIXED_EXPENSE || type === FinancialItemType.EXTRA_EXPENSE) return FinancialItemType.EXPENSE;
-  return type;
+  if (type === FinancialItemType.INCOME) return FinancialItemType.INCOME;
+  if (type === FinancialItemType.EXPENSE) return FinancialItemType.EXPENSE;
+  return undefined;
 }
 
 function isExpenseType(type: FinancialItemType | undefined) {
-  return type === FinancialItemType.EXPENSE || type === FinancialItemType.FIXED_EXPENSE || type === FinancialItemType.EXTRA_EXPENSE;
+  return type === FinancialItemType.EXPENSE;
 }
 
 function typeFilter(type: 'INCOME' | 'EXPENSE') {
   return type === 'INCOME'
-    ? [FinancialItemType.INCOME, FinancialItemType.FIXED_INCOME, FinancialItemType.EXTRA_INCOME]
-    : [FinancialItemType.EXPENSE, FinancialItemType.FIXED_EXPENSE, FinancialItemType.EXTRA_EXPENSE];
+    ? [FinancialItemType.INCOME]
+    : [FinancialItemType.EXPENSE];
 }
 
 function normalizeStatus(type: FinancialItemType, dueDate?: Date | null, paymentDate?: Date | null, status?: PaymentStatus) {
+  if (status === PaymentStatus.CANCELADO) return PaymentStatus.CANCELADO;
   if (!isExpenseType(type)) return PaymentStatus.PAGO;
   if (paymentDate || status === PaymentStatus.PAGO) return PaymentStatus.PAGO;
   if (dueDate) {
@@ -67,12 +70,17 @@ function normalizeStatus(type: FinancialItemType, dueDate?: Date | null, payment
   return status ?? PaymentStatus.PENDENTE;
 }
 
+function currentStatus(item: {
+  type: FinancialItemType;
+  dueDate: Date | null;
+  paymentDate: Date | null;
+  status: PaymentStatus;
+}) {
+  return normalizeStatus(item.type, item.dueDate, item.paymentDate, item.status);
+}
+
 function inferCategory(input: CreateFinancialItemInput | UpdateFinancialItemInput) {
   if (input.category) return input.category;
-  if (input.type === FinancialItemType.FIXED_INCOME) return 'Receitas fixas';
-  if (input.type === FinancialItemType.EXTRA_INCOME) return 'Receitas extras';
-  if (input.type === FinancialItemType.FIXED_EXPENSE) return 'Despesas fixas';
-  if (input.type === FinancialItemType.EXTRA_EXPENSE) return 'Despesas extras';
   return 'Outros';
 }
 
@@ -80,7 +88,7 @@ function normalizeWriteInput(input: CreateFinancialItemInput) {
   const date = input.date;
   const type = normalizeType(input.type) ?? FinancialItemType.EXPENSE;
   const name = input.name ?? input.title ?? 'Lancamento';
-  const isFixed = input.isFixed ?? (input.type === FinancialItemType.FIXED_INCOME || input.type === FinancialItemType.FIXED_EXPENSE);
+  const isFixed = input.isFixed ?? false;
 
   return {
     title: input.title ?? name,
@@ -106,6 +114,7 @@ export async function listFinancialItems(userId: string, filters: ListFinancialI
   const where: Prisma.FinancialItemWhereInput = {
     userId,
     type: filters.type,
+    status: filters.status && filters.status !== PaymentStatus.ATRASADO ? filters.status : undefined,
     date: {
       gte: filters.startDate,
       lte: filters.endDate
@@ -117,7 +126,10 @@ export async function listFinancialItems(userId: string, filters: ListFinancialI
     orderBy: [{ date: 'desc' }, { createdAt: 'desc' }]
   });
 
-  return items.map(serializeItem);
+  const serializedItems = items.map(serializeItem);
+  if (!filters.status || filters.status !== PaymentStatus.ATRASADO) return serializedItems;
+
+  return serializedItems.filter((item) => item.status === PaymentStatus.ATRASADO);
 }
 
 export async function createFinancialItem(userId: string, input: CreateFinancialItemInput) {
@@ -156,6 +168,29 @@ export async function updateFinancialItem(userId: string, id: string, input: Upd
       dueDay: input.dueDay ?? (input.dueDate ? input.dueDate.getDate() : undefined),
       month: input.month ?? (input.date ? input.date.getMonth() + 1 : undefined),
       year: input.year ?? (input.date ? input.date.getFullYear() : undefined)
+    }
+  });
+
+  return serializeItem(item);
+}
+
+export async function updateFinancialItemPaymentStatus(userId: string, id: string, input: PaymentStatusUpdateInput) {
+  const existing = await prisma.financialItem.findFirst({ where: { id, userId } });
+  if (!existing) {
+    const error = new Error('Registro financeiro nao encontrado') as Error & { statusCode: number };
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const paymentDate = input.status === PaymentStatus.PAGO
+    ? input.paymentDate ?? input.paidAt ?? existing.paymentDate ?? new Date()
+    : null;
+
+  const item = await prisma.financialItem.update({
+    where: { id },
+    data: {
+      status: input.status,
+      paymentDate
     }
   });
 
@@ -202,34 +237,88 @@ export async function deleteFinancialCategory(userId: string, input: CategoryAct
 }
 
 export async function getDashboard(userId: string) {
-  const items = await prisma.financialItem.findMany({
-    where: { userId },
-    orderBy: [{ date: 'desc' }, { createdAt: 'desc' }]
-  });
+  const [items, savingsTotal, savingsOut] = await Promise.all([
+    prisma.financialItem.findMany({
+      where: { userId },
+      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }]
+    }),
+    prisma.savings.aggregate({
+      where: { userId },
+      _sum: { amount: true }
+    }),
+    prisma.savings.aggregate({
+      where: { userId, amount: { gt: 0 } },
+      _sum: { amount: true }
+    })
+  ]);
 
   const totals = {
-    fixedExpenses: 0,
-    extraExpenses: 0,
-    fixedIncomes: 0,
-    extraIncomes: 0,
     totalIncomes: 0,
     totalExpenses: 0,
+    totalSavings: toNumber(savingsTotal._sum.amount ?? 0),
     finalBalance: 0
   };
 
   for (const item of items) {
     const amount = toNumber(item.amount);
-    if (item.type === FinancialItemType.FIXED_EXPENSE) totals.fixedExpenses += amount;
-    if (item.type === FinancialItemType.EXTRA_EXPENSE || item.type === FinancialItemType.EXPENSE) totals.extraExpenses += amount;
-    if (item.type === FinancialItemType.FIXED_INCOME) totals.fixedIncomes += amount;
-    if (item.type === FinancialItemType.EXTRA_INCOME || item.type === FinancialItemType.INCOME) totals.extraIncomes += amount;
+    if (!isExpenseType(item.type)) totals.totalIncomes += amount;
+    if (isExpenseType(item.type)) totals.totalExpenses += amount;
   }
 
-  totals.totalIncomes = totals.fixedIncomes + totals.extraIncomes;
-  totals.totalExpenses = totals.fixedExpenses + totals.extraExpenses;
-  totals.finalBalance = totals.totalIncomes - totals.totalExpenses;
+  totals.finalBalance = totals.totalIncomes - totals.totalExpenses - toNumber(savingsOut._sum.amount ?? 0);
 
   return { totals, recentItems: items.slice(0, 8).map(serializeItem) };
+}
+
+export async function getPaymentSummary(userId: string, filters: PaymentSummaryInput) {
+  const items = await prisma.financialItem.findMany({
+    where: {
+      userId,
+      type: { in: typeFilter('EXPENSE') },
+      month: filters.month,
+      year: filters.year,
+      date: {
+        gte: filters.startDate,
+        lte: filters.endDate
+      }
+    }
+  });
+
+  const summary = {
+    paidCount: 0,
+    pendingCount: 0,
+    overdueCount: 0,
+    canceledCount: 0,
+    paidTotal: 0,
+    pendingTotal: 0,
+    overdueTotal: 0
+  };
+
+  for (const item of items) {
+    const amount = toNumber(item.amount);
+    const status = currentStatus(item);
+
+    if (status === PaymentStatus.PAGO) {
+      summary.paidCount += 1;
+      summary.paidTotal += amount;
+    }
+
+    if (status === PaymentStatus.PENDENTE) {
+      summary.pendingCount += 1;
+      summary.pendingTotal += amount;
+    }
+
+    if (status === PaymentStatus.ATRASADO) {
+      summary.overdueCount += 1;
+      summary.overdueTotal += amount;
+    }
+
+    if (status === PaymentStatus.CANCELADO) {
+      summary.canceledCount += 1;
+    }
+  }
+
+  return summary;
 }
 
 export async function updateFinancialItemValue(userId: string, id: string, input: UpdateFinancialItemValueInput) {
@@ -271,10 +360,10 @@ export async function updateFinancialItemValue(userId: string, id: string, input
 
   const summarize = (items: typeof yearItems) => {
     const totalIncome = items
-      .filter((item) => item.type === FinancialItemType.INCOME || item.type === FinancialItemType.FIXED_INCOME || item.type === FinancialItemType.EXTRA_INCOME)
+      .filter((item) => item.type === FinancialItemType.INCOME)
       .reduce((sum, item) => sum + toNumber(item.amount), 0);
     const totalExpense = items
-      .filter((item) => item.type === FinancialItemType.EXPENSE || item.type === FinancialItemType.FIXED_EXPENSE || item.type === FinancialItemType.EXTRA_EXPENSE)
+      .filter((item) => item.type === FinancialItemType.EXPENSE)
       .reduce((sum, item) => sum + toNumber(item.amount), 0);
     return { totalIncome, totalExpense, balance: totalIncome - totalExpense };
   };
