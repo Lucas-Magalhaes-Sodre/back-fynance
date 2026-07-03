@@ -3,6 +3,9 @@ import { authenticate } from '../users/authenticate.js';
 import {
   createSavingController,
   deleteSavingController,
+  savingsExtractController,
+  savingsOverviewController,
+  savingsProjectionController,
   listSavingsController,
   savingsSummaryController,
   savingsTransferController,
@@ -14,6 +17,9 @@ export async function savingsRoutes(app: FastifyInstance) {
 
   app.get('/', listSavingsController);
   app.post('/', createSavingController);
+  app.get('/overview', savingsOverviewController);
+  app.get('/extract', savingsExtractController);
+  app.get('/projection', savingsProjectionController);
   app.get('/summary', savingsSummaryController);
   app.post('/transfer', savingsTransferController);
   app.put('/:id', updateSavingController);

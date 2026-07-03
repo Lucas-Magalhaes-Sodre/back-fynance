@@ -7,9 +7,10 @@ import type {
 } from './financial-category.schemas.js';
 
 const defaultCategories = [
+  { name: 'Economias', type: FinancialItemType.INCOME, color: '#16A34A' },
   { name: 'Salário', type: FinancialItemType.INCOME, color: '#2563EB' },
   { name: 'Freelance', type: FinancialItemType.INCOME, color: '#0F766E' },
-  { name: 'Investimentos', type: FinancialItemType.INCOME, color: '#7C3AED' },
+  { name: 'Rendimentos', type: FinancialItemType.INCOME, color: '#7C3AED' },
   { name: 'Renda Extra', type: FinancialItemType.INCOME, color: '#16A34A' },
   { name: 'Cashback/Reembolso', type: FinancialItemType.INCOME, color: '#0891B2' },
   { name: 'Vendas', type: FinancialItemType.INCOME, color: '#DB2777' },
@@ -25,11 +26,18 @@ const defaultCategories = [
   { name: 'Lazer', type: FinancialItemType.EXPENSE, color: '#16A34A' },
   { name: 'Impostos', type: FinancialItemType.EXPENSE, color: '#9333EA' },
   { name: 'Compras', type: FinancialItemType.EXPENSE, color: '#F59E0B' },
-  { name: 'Outros', type: FinancialItemType.EXPENSE, color: '#64748B' }
+  { name: 'Outros', type: FinancialItemType.EXPENSE, color: '#64748B' },
+  { name: 'Poupanca', type: FinancialItemType.INVESTMENT, color: '#D4A017' },
+  { name: 'Caixinha', type: FinancialItemType.INVESTMENT, color: '#F59E0B' },
+  { name: 'Cofrinho', type: FinancialItemType.INVESTMENT, color: '#0F766E' },
+  { name: 'Renda fixa', type: FinancialItemType.INVESTMENT, color: '#2563EB' },
+  { name: 'Outros', type: FinancialItemType.INVESTMENT, color: '#64748B' }
 ];
 
-function normalizeType(type: 'INCOME' | 'EXPENSE') {
-  return type === 'INCOME' ? FinancialItemType.INCOME : FinancialItemType.EXPENSE;
+function normalizeType(type: 'INCOME' | 'EXPENSE' | 'INVESTMENT') {
+  if (type === 'INCOME') return FinancialItemType.INCOME;
+  if (type === 'INVESTMENT') return FinancialItemType.INVESTMENT;
+  return FinancialItemType.EXPENSE;
 }
 
 function normalizeCategoryName(name: string) {
@@ -38,6 +46,10 @@ function normalizeCategoryName(name: string) {
     .replace(/[\u0300-\u036f]/g, '')
     .toLocaleLowerCase('pt-BR')
     .trim();
+}
+
+function isProtectedSavingsIncomeCategory(category: { name: string; type: FinancialItemType }) {
+  return category.type === FinancialItemType.INCOME && normalizeCategoryName(category.name) === 'economias';
 }
 
 async function assertUniqueCategoryName(userId: string, type: FinancialItemType, name: string, exceptId?: string) {
@@ -60,9 +72,9 @@ async function assertUniqueCategoryName(userId: string, type: FinancialItemType,
 }
 
 function itemTypesForCategory(type: FinancialItemType) {
-  return type === FinancialItemType.INCOME
-    ? [FinancialItemType.INCOME]
-    : [FinancialItemType.EXPENSE];
+  if (type === FinancialItemType.INCOME) return [FinancialItemType.INCOME];
+  if (type === FinancialItemType.EXPENSE) return [FinancialItemType.EXPENSE];
+  return [];
 }
 
 function serializeCategory(category: {
@@ -74,7 +86,11 @@ function serializeCategory(category: {
   createdAt: Date;
   updatedAt: Date;
 }) {
-  return { ...category, type: category.type === FinancialItemType.INCOME ? 'INCOME' : 'EXPENSE' };
+  const isSystem = isProtectedSavingsIncomeCategory(category);
+  const metadata = { isSystem, canDelete: !isSystem };
+  if (category.type === FinancialItemType.INCOME) return { ...category, type: 'INCOME', ...metadata };
+  if (category.type === FinancialItemType.INVESTMENT) return { ...category, type: 'INVESTMENT', ...metadata };
+  return { ...category, type: 'EXPENSE', ...metadata };
 }
 
 async function ensureDefaultCategories(userId: string) {
@@ -96,8 +112,29 @@ async function ensureDefaultCategories(userId: string) {
   ]);
 }
 
+async function ensureSavingsIncomeCategory(userId: string) {
+  const existing = await prisma.financialCategory.findFirst({
+    where: {
+      userId,
+      type: FinancialItemType.INCOME,
+      name: 'Economias'
+    }
+  });
+  if (existing) return;
+
+  await prisma.financialCategory.create({
+    data: {
+      userId,
+      name: 'Economias',
+      type: FinancialItemType.INCOME,
+      color: '#16A34A'
+    }
+  });
+}
+
 export async function listFinancialCategories(userId: string, filters: ListFinancialCategoriesInput) {
   await ensureDefaultCategories(userId);
+  await ensureSavingsIncomeCategory(userId);
   const categories = await prisma.financialCategory.findMany({
     where: {
       userId,
@@ -111,6 +148,7 @@ export async function listFinancialCategories(userId: string, filters: ListFinan
 
 export async function createFinancialCategory(userId: string, input: FinancialCategoryInput) {
   await ensureDefaultCategories(userId);
+  await ensureSavingsIncomeCategory(userId);
   const type = normalizeType(input.type);
   const name = input.name.trim();
   await assertUniqueCategoryName(userId, type, name);
@@ -137,10 +175,17 @@ export async function createFinancialCategory(userId: string, input: FinancialCa
 
 export async function updateFinancialCategory(userId: string, id: string, input: UpdateFinancialCategoryInput) {
   await ensureDefaultCategories(userId);
+  await ensureSavingsIncomeCategory(userId);
   const existing = await prisma.financialCategory.findFirst({ where: { id, userId } });
   if (!existing) {
     const error = new Error('Categoria nao encontrada') as Error & { statusCode: number };
     error.statusCode = 404;
+    throw error;
+  }
+
+  if (isProtectedSavingsIncomeCategory(existing) && (input.name || input.type)) {
+    const error = new Error('A categoria Economias e obrigatoria e nao pode mudar de tipo') as Error & { statusCode: number };
+    error.statusCode = 400;
     throw error;
   }
 
@@ -159,10 +204,19 @@ export async function updateFinancialCategory(userId: string, id: string, input:
     });
 
     if (nextName !== existing.name || nextType !== existing.type) {
-      await tx.financialItem.updateMany({
-        where: { userId, category: existing.name, type: { in: itemTypesForCategory(existing.type) } },
-        data: { category: nextName }
-      });
+      const itemTypes = itemTypesForCategory(existing.type);
+      if (itemTypes.length) {
+        await tx.financialItem.updateMany({
+          where: { userId, category: existing.name, type: { in: itemTypes } },
+          data: { category: nextName }
+        });
+      }
+      if (existing.type === FinancialItemType.INVESTMENT) {
+        await tx.savings.updateMany({
+          where: { userId, category: existing.name },
+          data: { category: nextName }
+        });
+      }
     }
 
     return updated;
@@ -173,10 +227,17 @@ export async function updateFinancialCategory(userId: string, id: string, input:
 
 export async function deleteFinancialCategory(userId: string, id: string) {
   await ensureDefaultCategories(userId);
+  await ensureSavingsIncomeCategory(userId);
   const existing = await prisma.financialCategory.findFirst({ where: { id, userId } });
   if (!existing) {
     const error = new Error('Categoria nao encontrada') as Error & { statusCode: number };
     error.statusCode = 404;
+    throw error;
+  }
+
+  if (isProtectedSavingsIncomeCategory(existing)) {
+    const error = new Error('A categoria Economias nao pode ser excluida') as Error & { statusCode: number };
+    error.statusCode = 400;
     throw error;
   }
 

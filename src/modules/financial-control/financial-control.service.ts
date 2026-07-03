@@ -67,7 +67,7 @@ function savingRows(savings: SavingItem[]) {
   }>();
 
   for (const saving of savings) {
-    const category = saving.title;
+    const category = saving.category ?? 'Outros';
     if (!rowMap.has(category)) {
       rowMap.set(category, {
         category,

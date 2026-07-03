@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const financialCategoryTypeSchema = z.enum(['INCOME', 'EXPENSE']);
+export const financialCategoryTypeSchema = z.enum(['INCOME', 'EXPENSE', 'INVESTMENT']);
 
 export const financialCategorySchema = z.object({
   name: z.string().min(2),

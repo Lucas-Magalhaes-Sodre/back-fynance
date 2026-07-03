@@ -94,8 +94,8 @@ export async function getFinancialInsights(userId: string, month: number, year: 
       type: availableBalance >= 0 ? 'POSITIVE' : 'NEGATIVE',
       title: availableBalance >= 0 ? 'Saldo disponivel positivo no mes' : 'Saldo disponivel negativo no mes',
       description: availableBalance >= 0
-        ? 'Suas receitas cobrem as despesas e economias/investimentos deste periodo.'
-        : 'Suas despesas e economias/investimentos ultrapassaram as receitas deste periodo.',
+        ? 'Suas receitas cobrem as despesas e economias deste periodo.'
+        : 'Suas despesas e economias ultrapassaram as receitas deste periodo.',
       value: availableBalance
     },
     {
@@ -106,13 +106,13 @@ export async function getFinancialInsights(userId: string, month: number, year: 
     },
     {
       type: monthlySavings > 0 ? 'POSITIVE' : 'INFO',
-      title: 'Economias/investimentos registrados',
+      title: 'Economias registradas',
       description: monthlySavings > 0
         ? 'Voce registrou dinheiro guardado ou investido neste mes.'
-        : 'Ainda nao ha economia/investimento registrada neste mes.',
+        : 'Ainda nao ha economia registrada neste mes.',
       value: monthlySavings,
-      actionLabel: 'Ver economias/invest.',
-      actionTarget: '/app/savings'
+      actionLabel: 'Ver economias',
+      actionTarget: '/app/economy'
     },
     {
       type: overdueBills.length > 0 ? 'NEGATIVE' : 'POSITIVE',

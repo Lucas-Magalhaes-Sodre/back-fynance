@@ -3,6 +3,8 @@ import { z } from 'zod';
 import {
   createSavingSchema,
   listSavingsSchema,
+  savingsExtractSchema,
+  savingsProjectionSchema,
   savingsSummarySchema,
   savingsTransferSchema,
   updateSavingSchema
@@ -10,6 +12,9 @@ import {
 import {
   createSaving,
   deleteSaving,
+  getSavingsExtract,
+  getSavingsOverview,
+  getSavingsProjection,
   getSavingsSummary,
   listSavings,
   transferSavings,
@@ -47,6 +52,23 @@ export async function savingsSummaryController(request: FastifyRequest, reply: F
   const filters = savingsSummarySchema.parse(request.query);
   const summary = await getSavingsSummary(request.user.sub, filters);
   return reply.send({ summary });
+}
+
+export async function savingsOverviewController(request: FastifyRequest, reply: FastifyReply) {
+  const overview = await getSavingsOverview(request.user.sub);
+  return reply.send({ overview });
+}
+
+export async function savingsExtractController(request: FastifyRequest, reply: FastifyReply) {
+  const filters = savingsExtractSchema.parse(request.query);
+  const extract = await getSavingsExtract(request.user.sub, filters);
+  return reply.send(extract);
+}
+
+export async function savingsProjectionController(request: FastifyRequest, reply: FastifyReply) {
+  const filters = savingsProjectionSchema.parse(request.query);
+  const projection = await getSavingsProjection(request.user.sub, filters);
+  return reply.send({ projection });
 }
 
 export async function savingsTransferController(request: FastifyRequest, reply: FastifyReply) {

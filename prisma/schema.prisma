@@ -11,6 +11,7 @@ datasource db {
 enum FinancialItemType {
   INCOME
   EXPENSE
+  INVESTMENT
   FIXED_EXPENSE
   EXTRA_EXPENSE
   FIXED_INCOME
@@ -72,11 +73,15 @@ model Savings {
   userId      String
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   title       String
+  category    String   @default("Outros")
   description String?
   amount      Decimal  @db.Decimal(12, 2)
   date        DateTime
   month       Int
   year        Int
+  isFixed     Boolean  @default(false)
+  recurrenceType RecurrenceType @default(NONE)
+  recurrenceGroupId String?
   goalId      String?
   goal        FinancialGoal? @relation(fields: [goalId], references: [id], onDelete: SetNull)
   createdAt   DateTime @default(now())
@@ -88,6 +93,7 @@ model Savings {
   @@index([userId, year])
   @@index([userId, year, month])
   @@index([userId, date])
+  @@index([recurrenceGroupId])
 }
 
 model FinancialGoal {
