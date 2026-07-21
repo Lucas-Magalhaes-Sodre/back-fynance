@@ -1,0 +1,5 @@
+ALTER TABLE "CreditCard"
+ADD COLUMN "color" TEXT NOT NULL DEFAULT '#0F766E';
+
+ALTER TABLE "CreditCardPurchase"
+ADD COLUMN "skippedInstallments" INTEGER[] NOT NULL DEFAULT ARRAY[]::INTEGER[];
