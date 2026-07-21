@@ -48,6 +48,8 @@ model User {
   categories    FinancialCategory[]
   savings       Savings[]
   goals         FinancialGoal[]
+  creditCards   CreditCard[]
+  creditCardPurchases CreditCardPurchase[]
   financialCategoriesInitialized Boolean @default(false)
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
@@ -149,4 +151,42 @@ model FinancialItem {
   @@index([userId, year])
   @@index([userId, year, month])
   @@index([userId, date])
+}
+
+model CreditCard {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  dueDay    Int
+  creditLimit Decimal? @db.Decimal(12, 2)
+  isActive  Boolean  @default(true)
+  color     String   @default("#0F766E")
+  purchases CreditCardPurchase[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, name])
+  @@index([userId])
+}
+
+model CreditCardPurchase {
+  id          String     @id @default(uuid())
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cardId      String
+  card        CreditCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  amount      Decimal    @db.Decimal(12, 2)
+  purchaseDate DateTime
+  installments Int       @default(1)
+  skippedInstallments Int[] @default([])
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([userId])
+  @@index([cardId])
+  @@index([purchaseDate])
+  @@index([userId, cardId])
 }

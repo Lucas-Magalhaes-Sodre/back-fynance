@@ -3,6 +3,7 @@ import jwt from '@fastify/jwt';
 import fastify from 'fastify';
 import { ZodError } from 'zod';
 import { authRoutes } from './modules/auth/auth.routes.js';
+import { creditCardRoutes } from './modules/credit-cards/credit-card.routes.js';
 import { financialCalendarRoutes } from './modules/financial-calendar/financial-calendar.routes.js';
 import { financialCategoryRoutes } from './modules/financial-categories/financial-category.routes.js';
 import { financialComparisonRoutes } from './modules/financial-comparison/financial-comparison.routes.js';
@@ -42,6 +43,7 @@ export function buildApp() {
   app.get('/health', async () => ({ status: 'ok', message: 'Backend is running' }));
   app.register(authRoutes, { prefix: '/auth' });
   app.register(userRoutes, { prefix: '/users' });
+  app.register(creditCardRoutes, { prefix: '/credit-cards' });
   app.register(financialItemRoutes, { prefix: '/financial-items' });
   app.register(financialCategoryRoutes, { prefix: '/financial-categories' });
   app.register(savingsRoutes, { prefix: '/savings' });

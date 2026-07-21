@@ -19,7 +19,7 @@ const defaultCategories = [
   { name: 'Moradia', type: FinancialItemType.EXPENSE, color: '#DC2626' },
   { name: 'Alimentação', type: FinancialItemType.EXPENSE, color: '#CA8A04' },
   { name: 'Transporte', type: FinancialItemType.EXPENSE, color: '#0891B2' },
-  { name: 'Cartão de Crédito', type: FinancialItemType.EXPENSE, color: '#EA580C' },
+  { name: 'Cartões de Crédito', type: FinancialItemType.EXPENSE, color: '#EA580C' },
   { name: 'Saúde', type: FinancialItemType.EXPENSE, color: '#DB2777' },
   { name: 'Educação', type: FinancialItemType.EXPENSE, color: '#7C3AED' },
   { name: 'Assinaturas', type: FinancialItemType.EXPENSE, color: '#475569' },
@@ -50,6 +50,15 @@ function normalizeCategoryName(name: string) {
 
 function isProtectedSavingsIncomeCategory(category: { name: string; type: FinancialItemType }) {
   return category.type === FinancialItemType.INCOME && normalizeCategoryName(category.name) === 'economias';
+}
+
+function isProtectedCreditCardExpenseCategory(category: { name: string; type: FinancialItemType }) {
+  const name = normalizeCategoryName(category.name);
+  return category.type === FinancialItemType.EXPENSE && (name === 'cartao de credito' || name === 'cartoes de credito');
+}
+
+function isProtectedSystemCategory(category: { name: string; type: FinancialItemType }) {
+  return isProtectedSavingsIncomeCategory(category) || isProtectedCreditCardExpenseCategory(category);
 }
 
 async function assertUniqueCategoryName(userId: string, type: FinancialItemType, name: string, exceptId?: string) {
@@ -86,7 +95,7 @@ function serializeCategory(category: {
   createdAt: Date;
   updatedAt: Date;
 }) {
-  const isSystem = isProtectedSavingsIncomeCategory(category);
+  const isSystem = isProtectedSystemCategory(category);
   const metadata = { isSystem, canDelete: !isSystem };
   if (category.type === FinancialItemType.INCOME) return { ...category, type: 'INCOME', ...metadata };
   if (category.type === FinancialItemType.INVESTMENT) return { ...category, type: 'INVESTMENT', ...metadata };
@@ -132,9 +141,49 @@ async function ensureSavingsIncomeCategory(userId: string) {
   });
 }
 
+async function ensureCreditCardExpenseCategory(userId: string) {
+  const existing = await prisma.financialCategory.findFirst({
+    where: {
+      userId,
+      type: FinancialItemType.EXPENSE,
+      name: 'Cartões de Crédito'
+    }
+  });
+  if (existing) return;
+
+  const singular = await prisma.financialCategory.findFirst({
+    where: {
+      userId,
+      type: FinancialItemType.EXPENSE,
+      name: 'Cartão de Crédito'
+    }
+  });
+  if (singular) {
+    await prisma.financialCategory.update({
+      where: { id: singular.id },
+      data: { name: 'Cartões de Crédito' }
+    });
+    await prisma.financialItem.updateMany({
+      where: { userId, type: FinancialItemType.EXPENSE, category: 'Cartão de Crédito' },
+      data: { category: 'Cartões de Crédito' }
+    });
+    return;
+  }
+
+  await prisma.financialCategory.create({
+    data: {
+      userId,
+      name: 'Cartões de Crédito',
+      type: FinancialItemType.EXPENSE,
+      color: '#EA580C'
+    }
+  });
+}
+
 export async function listFinancialCategories(userId: string, filters: ListFinancialCategoriesInput) {
   await ensureDefaultCategories(userId);
   await ensureSavingsIncomeCategory(userId);
+  await ensureCreditCardExpenseCategory(userId);
   const categories = await prisma.financialCategory.findMany({
     where: {
       userId,
@@ -149,6 +198,7 @@ export async function listFinancialCategories(userId: string, filters: ListFinan
 export async function createFinancialCategory(userId: string, input: FinancialCategoryInput) {
   await ensureDefaultCategories(userId);
   await ensureSavingsIncomeCategory(userId);
+  await ensureCreditCardExpenseCategory(userId);
   const type = normalizeType(input.type);
   const name = input.name.trim();
   await assertUniqueCategoryName(userId, type, name);
@@ -176,6 +226,7 @@ export async function createFinancialCategory(userId: string, input: FinancialCa
 export async function updateFinancialCategory(userId: string, id: string, input: UpdateFinancialCategoryInput) {
   await ensureDefaultCategories(userId);
   await ensureSavingsIncomeCategory(userId);
+  await ensureCreditCardExpenseCategory(userId);
   const existing = await prisma.financialCategory.findFirst({ where: { id, userId } });
   if (!existing) {
     const error = new Error('Categoria nao encontrada') as Error & { statusCode: number };
@@ -183,8 +234,18 @@ export async function updateFinancialCategory(userId: string, id: string, input:
     throw error;
   }
 
-  if (isProtectedSavingsIncomeCategory(existing) && (input.name || input.type)) {
+  const changesProtectedIdentity =
+    (input.name && input.name.trim() !== existing.name) ||
+    (input.type && normalizeType(input.type) !== existing.type);
+
+  if (isProtectedSavingsIncomeCategory(existing) && changesProtectedIdentity) {
     const error = new Error('A categoria Economias e obrigatoria e nao pode mudar de tipo') as Error & { statusCode: number };
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (isProtectedCreditCardExpenseCategory(existing) && changesProtectedIdentity) {
+    const error = new Error('A categoria Cartoes de Credito e obrigatoria e nao pode mudar de tipo') as Error & { statusCode: number };
     error.statusCode = 400;
     throw error;
   }
@@ -228,6 +289,7 @@ export async function updateFinancialCategory(userId: string, id: string, input:
 export async function deleteFinancialCategory(userId: string, id: string) {
   await ensureDefaultCategories(userId);
   await ensureSavingsIncomeCategory(userId);
+  await ensureCreditCardExpenseCategory(userId);
   const existing = await prisma.financialCategory.findFirst({ where: { id, userId } });
   if (!existing) {
     const error = new Error('Categoria nao encontrada') as Error & { statusCode: number };
@@ -235,8 +297,8 @@ export async function deleteFinancialCategory(userId: string, id: string) {
     throw error;
   }
 
-  if (isProtectedSavingsIncomeCategory(existing)) {
-    const error = new Error('A categoria Economias nao pode ser excluida') as Error & { statusCode: number };
+  if (isProtectedSystemCategory(existing)) {
+    const error = new Error('Esta categoria obrigatoria nao pode ser excluida') as Error & { statusCode: number };
     error.statusCode = 400;
     throw error;
   }

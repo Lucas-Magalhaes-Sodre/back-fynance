@@ -182,15 +182,11 @@ export async function updateFinancialItemPaymentStatus(userId: string, id: strin
     throw error;
   }
 
-  const paymentDate = input.status === PaymentStatus.PAGO
-    ? input.paymentDate ?? input.paidAt ?? existing.paymentDate ?? new Date()
-    : null;
-
   const item = await prisma.financialItem.update({
     where: { id },
     data: {
       status: input.status,
-      paymentDate
+      paymentDate: null
     }
   });
 

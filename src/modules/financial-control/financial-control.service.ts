@@ -9,8 +9,27 @@ function toNumber(value: Prisma.Decimal | number) {
   return Number(value);
 }
 
+function dateKey(date: Date) {
+  return date.toISOString().slice(0, 10);
+}
+
+function currentStatus(item: Pick<Item, 'type' | 'dueDate' | 'paymentDate' | 'status'>) {
+  if (item.status === PaymentStatus.CANCELADO) return PaymentStatus.CANCELADO;
+  if (!isExpense(item.type)) return PaymentStatus.PAGO;
+  if (item.status === PaymentStatus.PAGO) return PaymentStatus.PAGO;
+  if (item.paymentDate) return PaymentStatus.PAGO;
+
+  if (item.dueDate) {
+    const todayKey = dateKey(new Date());
+    const dueKey = dateKey(item.dueDate);
+    if (dueKey < todayKey) return PaymentStatus.ATRASADO;
+  }
+
+  return item.status;
+}
+
 function serializeItem(item: Item) {
-  return { ...item, amount: toNumber(item.amount) };
+  return { ...item, amount: toNumber(item.amount), status: currentStatus(item) };
 }
 
 function serializeSaving(saving: SavingItem) {
@@ -34,9 +53,9 @@ function summarize(items: Item[], savings: SavingItem[] = []) {
     return amount > 0 ? sum + amount : sum;
   }, 0);
   const expenses = items.filter((item) => isExpense(item.type));
-  const paidExpenses = expenses.filter((item) => item.status === PaymentStatus.PAGO);
-  const overdueExpenses = expenses.filter((item) => item.status === PaymentStatus.ATRASADO);
-  const pendingExpenses = expenses.filter((item) => item.status === PaymentStatus.PENDENTE);
+  const paidExpenses = expenses.filter((item) => currentStatus(item) === PaymentStatus.PAGO);
+  const overdueExpenses = expenses.filter((item) => currentStatus(item) === PaymentStatus.ATRASADO);
+  const pendingExpenses = expenses.filter((item) => currentStatus(item) === PaymentStatus.PENDENTE);
   return {
     totalIncome,
     totalExpense,
@@ -182,30 +201,32 @@ export async function getMonthControl(userId: string, month: number, year: numbe
 }
 
 export async function getDayControl(userId: string, date: Date) {
-  const start = new Date(date);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(date);
-  end.setHours(23, 59, 59, 999);
+  const targetKey = dateKey(date);
+  const month = date.getUTCMonth() + 1;
+  const year = date.getUTCFullYear();
 
   const [items, savings] = await Promise.all([
     prisma.financialItem.findMany({
-      where: { userId, date: { gte: start, lte: end } },
+      where: { userId, month, year },
       orderBy: [{ date: 'asc' }, { createdAt: 'asc' }]
     }),
     prisma.savings.findMany({
-      where: { userId, date: { gte: start, lte: end } },
+      where: { userId, month, year },
       orderBy: [{ date: 'asc' }, { createdAt: 'asc' }]
     })
   ]);
 
-  return { date: start.toISOString().slice(0, 10), ...splitItems(items), savings: savings.map(serializeSaving), totals: summarize(items, savings) };
+  const dayItems = items.filter((item) => dateKey(item.date) === targetKey);
+  const daySavings = savings.filter((saving) => dateKey(saving.date) === targetKey);
+
+  return { date: targetKey, ...splitItems(dayItems), savings: daySavings.map(serializeSaving), totals: summarize(dayItems, daySavings) };
 }
 
 export async function getWeekControl(userId: string, startDate: Date, endDate: Date) {
-  const start = new Date(startDate);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(endDate);
-  end.setHours(23, 59, 59, 999);
+  const startKey = dateKey(startDate);
+  const endKey = dateKey(endDate);
+  const start = new Date(`${startKey}T00:00:00.000Z`);
+  const end = new Date(`${endKey}T23:59:59.999Z`);
 
   const [items, savings] = await Promise.all([
     prisma.financialItem.findMany({
@@ -219,17 +240,17 @@ export async function getWeekControl(userId: string, startDate: Date, endDate: D
   ]);
 
   const days = Array.from({ length: 7 }, (_, index) => {
-    const day = new Date(start);
-    day.setDate(start.getDate() + index);
-    const dayKey = day.toISOString().slice(0, 10);
-    const dayItems = items.filter((item) => item.date.toISOString().slice(0, 10) === dayKey);
-    const daySavings = savings.filter((saving) => saving.date.toISOString().slice(0, 10) === dayKey);
+    const day = new Date(`${startKey}T00:00:00.000Z`);
+    day.setUTCDate(day.getUTCDate() + index);
+    const dayKey = dateKey(day);
+    const dayItems = items.filter((item) => dateKey(item.date) === dayKey);
+    const daySavings = savings.filter((saving) => dateKey(saving.date) === dayKey);
     return { date: dayKey, ...splitItems(dayItems), savings: daySavings.map(serializeSaving), totals: summarize(dayItems, daySavings) };
   });
 
   return {
-    startDate: start.toISOString().slice(0, 10),
-    endDate: end.toISOString().slice(0, 10),
+    startDate: startKey,
+    endDate: endKey,
     days,
     ...splitItems(items),
     savings: savings.map(serializeSaving),
