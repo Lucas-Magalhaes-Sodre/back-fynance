@@ -11,6 +11,11 @@ const financialGoalBaseSchema = z.object({
   startDate: z.coerce.date(),
   targetDate: z.coerce.date().optional().nullable(),
   category: z.string().optional().nullable(),
+  imageUrl: z.string().optional().nullable(),
+  imageUrls: z.array(z.string()).max(3).optional(),
+  color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
+  hasYield: z.coerce.boolean().optional(),
+  yieldRateMonthly: z.coerce.number().min(0).max(100).optional().nullable(),
   status: financialGoalStatusSchema.optional()
 });
 

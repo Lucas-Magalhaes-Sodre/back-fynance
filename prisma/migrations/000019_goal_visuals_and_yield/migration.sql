@@ -1,0 +1,9 @@
+ALTER TABLE "FinancialGoal"
+ADD COLUMN "imageUrl" TEXT,
+ADD COLUMN "color" TEXT NOT NULL DEFAULT '#0F766E',
+ADD COLUMN "hasYield" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN "yieldRateMonthly" DECIMAL(7, 4);
+
+ALTER TABLE "Savings"
+ADD COLUMN "hasYield" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN "yieldRateMonthly" DECIMAL(7, 4);

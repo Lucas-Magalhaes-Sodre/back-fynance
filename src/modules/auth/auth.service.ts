@@ -3,11 +3,31 @@ import type { FastifyInstance } from 'fastify';
 import { prisma } from '../../shared/prisma.js';
 import type { ForgotPasswordInput, LoginInput, RegisterInput } from './auth.schemas.js';
 
-function sanitizeUser(user: { id: string; name: string; email: string; createdAt: Date; updatedAt: Date }) {
+export const LGPD_CONSENT_VERSION = '2026-07-21';
+
+function sanitizeUser(user: {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string | null;
+  city?: string | null;
+  occupation?: string | null;
+  lgpdAcceptedAt?: Date | null;
+  lgpdConsentVersion?: string | null;
+  marketingConsent?: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
   return {
     id: user.id,
     name: user.name,
     email: user.email,
+    phone: user.phone ?? null,
+    city: user.city ?? null,
+    occupation: user.occupation ?? null,
+    lgpdAcceptedAt: user.lgpdAcceptedAt ?? null,
+    lgpdConsentVersion: user.lgpdConsentVersion ?? null,
+    marketingConsent: user.marketingConsent ?? false,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt
   };
@@ -23,7 +43,14 @@ export async function registerUser(app: FastifyInstance, input: RegisterInput) {
 
   const password_hash = await bcrypt.hash(input.password, 10);
   const user = await prisma.user.create({
-    data: { name: input.name, email: input.email, password_hash }
+    data: {
+      name: input.name,
+      email: input.email,
+      password_hash,
+      lgpdAcceptedAt: new Date(),
+      lgpdConsentVersion: LGPD_CONSENT_VERSION,
+      marketingConsent: input.marketingConsent
+    }
   });
 
   const token = app.jwt.sign({ sub: user.id, email: user.email }, { expiresIn: '7d' });

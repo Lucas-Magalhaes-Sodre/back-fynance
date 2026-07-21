@@ -38,6 +38,27 @@ function endOfDate(value: Date) {
   return date;
 }
 
+function daysBetween(start: Date, end: Date) {
+  const startDay = new Date(start);
+  const endDay = new Date(end);
+  startDay.setHours(0, 0, 0, 0);
+  endDay.setHours(0, 0, 0, 0);
+  return Math.max(0, Math.ceil((endDay.getTime() - startDay.getTime()) / 86_400_000));
+}
+
+function projectedSavingAmount(saving: {
+  amount: Prisma.Decimal | number;
+  date: Date;
+  hasYield: boolean;
+  yieldRateMonthly: Prisma.Decimal | number | null;
+}) {
+  const amount = toNumber(saving.amount);
+  const rate = saving.hasYield ? toNumber(saving.yieldRateMonthly ?? 0) / 100 : 0;
+  if (amount <= 0 || rate <= 0) return amount;
+  const months = daysBetween(saving.date, new Date()) / 30;
+  return amount * Math.pow(1 + rate, months);
+}
+
 function savingsMovementType(amount: Prisma.Decimal | number) {
   return toNumber(amount) >= 0 ? 'DEPOSIT' : 'WITHDRAW';
 }
@@ -55,6 +76,7 @@ function serializeSaving(saving: {
   userId: string;
   title: string;
   category: string;
+  color: string;
   description: string | null;
   amount: Prisma.Decimal;
   date: Date;
@@ -64,10 +86,12 @@ function serializeSaving(saving: {
   recurrenceType: RecurrenceType;
   recurrenceGroupId: string | null;
   goalId: string | null;
+  hasYield: boolean;
+  yieldRateMonthly: Prisma.Decimal | null;
   createdAt: Date;
   updatedAt: Date;
 }) {
-  return { ...saving, amount: toNumber(saving.amount) };
+  return { ...saving, amount: toNumber(saving.amount), yieldRateMonthly: toNumber(saving.yieldRateMonthly ?? 0) };
 }
 
 function serializeExtractItem(saving: Awaited<ReturnType<typeof prisma.savings.findMany>>[number]) {
@@ -93,6 +117,7 @@ function writeData(input: CreateSavingInput) {
   return {
     title: input.title,
     category,
+    color: input.color?.toUpperCase() ?? '#D4A017',
     description: input.description,
     amount: input.amount,
     date: input.date,
@@ -101,7 +126,9 @@ function writeData(input: CreateSavingInput) {
     isFixed,
     recurrenceType,
     recurrenceGroupId: input.recurrenceGroupId ?? (isFixed || recurrenceType !== RecurrenceType.NONE ? `${category}:${input.title}` : null),
-    goalId: input.goalId
+    goalId: input.goalId,
+    hasYield: input.hasYield ?? false,
+    yieldRateMonthly: input.hasYield ? input.yieldRateMonthly ?? 0 : null
   };
 }
 
@@ -242,6 +269,7 @@ export async function transferSavings(userId: string, input: SavingsTransferInpu
         userId,
         title: input.title,
         category: input.category?.trim() || 'Outros',
+        color: input.color?.toUpperCase() ?? '#D4A017',
         description,
         amount: input.direction === 'SAVE_FROM_BALANCE' ? input.amount : -input.amount,
         date,
@@ -249,7 +277,9 @@ export async function transferSavings(userId: string, input: SavingsTransferInpu
         year,
         isFixed: false,
         recurrenceType: RecurrenceType.NONE,
-        goalId: input.goalId
+        goalId: input.goalId,
+        hasYield: input.hasYield ?? false,
+        yieldRateMonthly: input.hasYield ? input.yieldRateMonthly ?? 0 : null
       }
     });
 
@@ -297,6 +327,7 @@ export async function updateSaving(userId: string, id: string, input: UpdateSavi
     data: {
       title: input.title,
       category: input.category,
+      color: input.color?.toUpperCase(),
       description: input.description,
       amount: input.amount,
       date: input.date,
@@ -305,7 +336,9 @@ export async function updateSaving(userId: string, id: string, input: UpdateSavi
       isFixed: input.isFixed,
       recurrenceType: input.recurrenceType,
       recurrenceGroupId: input.recurrenceGroupId,
-      goalId: input.goalId
+      goalId: input.goalId,
+      hasYield: input.hasYield,
+      yieldRateMonthly: input.hasYield === false ? null : input.yieldRateMonthly
     }
   });
 
@@ -352,11 +385,12 @@ export async function getSavingsOverview(userId: string) {
     name: string;
     color: string;
     currentSavedBalance: number;
-    items: Map<string, { id: string; name: string; currentSavedBalance: number }>;
+    items: Map<string, { id: string; name: string; color: string; currentSavedBalance: number; rawSavedBalance: number; hasYield: boolean; yieldRateMonthly: number | null; savingIds: string[] }>;
   }>();
 
   for (const saving of savings) {
-    const amount = toNumber(saving.amount);
+    const rawAmount = toNumber(saving.amount);
+    const amount = projectedSavingAmount(saving);
     const category = categoryMap.get(saving.category) ?? {
       id: syntheticCategoryId(saving.category),
       name: saving.category,
@@ -368,9 +402,18 @@ export async function getSavingsOverview(userId: string) {
     const subItem = category.items.get(saving.title) ?? {
       id: syntheticSubItemId(saving.category, saving.title),
       name: saving.title,
-      currentSavedBalance: 0
+      color: saving.color,
+      currentSavedBalance: 0,
+      rawSavedBalance: 0,
+      hasYield: false,
+      yieldRateMonthly: null,
+      savingIds: []
     };
     subItem.currentSavedBalance += amount;
+    subItem.rawSavedBalance += rawAmount;
+    subItem.hasYield = subItem.hasYield || saving.hasYield;
+    subItem.yieldRateMonthly = saving.hasYield ? toNumber(saving.yieldRateMonthly ?? 0) : subItem.yieldRateMonthly;
+    subItem.savingIds.push(saving.id);
     category.items.set(saving.title, subItem);
     categoryMap.set(saving.category, category);
   }
@@ -385,7 +428,7 @@ export async function getSavingsOverview(userId: string) {
   const monthlySavingsOpportunity = monthlyIncome - monthlyExpense - monthlyPlannedSavings;
 
   return {
-    currentSavedBalance: savings.reduce((sum, saving) => sum + toNumber(saving.amount), 0),
+    currentSavedBalance: savings.reduce((sum, saving) => sum + projectedSavingAmount(saving), 0),
     monthlyPlannedSavings,
     monthlySavingsOpportunity: monthlySavingsOpportunity > 0 ? monthlySavingsOpportunity : 0,
     categories: Array.from(categoryMap.values())

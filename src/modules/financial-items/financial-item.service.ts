@@ -236,7 +236,8 @@ export async function getDashboard(userId: string) {
   const [items, savingsTotal, savingsOut] = await Promise.all([
     prisma.financialItem.findMany({
       where: { userId },
-      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }]
+      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+      take: 5
     }),
     prisma.savings.aggregate({
       where: { userId },
@@ -263,7 +264,7 @@ export async function getDashboard(userId: string) {
 
   totals.finalBalance = totals.totalIncomes - totals.totalExpenses - toNumber(savingsOut._sum.amount ?? 0);
 
-  return { totals, recentItems: items.slice(0, 8).map(serializeItem) };
+  return { totals, recentItems: items.map(serializeItem) };
 }
 
 export async function getPaymentSummary(userId: string, filters: PaymentSummaryInput) {

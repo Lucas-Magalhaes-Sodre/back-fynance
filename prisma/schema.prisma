@@ -44,6 +44,13 @@ model User {
   name          String
   email         String          @unique
   password_hash String
+  phone         String?
+  city          String?
+  occupation    String?
+  lgpdAcceptedAt DateTime?
+  lgpdConsentVersion String?
+  marketingConsent Boolean @default(false)
+  dataDeletionRequestedAt DateTime?
   items         FinancialItem[]
   categories    FinancialCategory[]
   savings       Savings[]
@@ -53,6 +60,21 @@ model User {
   financialCategoriesInitialized Boolean @default(false)
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
+}
+
+model CookieConsent {
+  id          String   @id @default(uuid())
+  visitorId   String
+  version     String
+  necessary   Boolean  @default(true)
+  preferences Boolean  @default(false)
+  analytics   Boolean  @default(false)
+  marketing   Boolean  @default(false)
+  sourcePath  String?
+  createdAt   DateTime @default(now())
+
+  @@index([visitorId])
+  @@index([createdAt])
 }
 
 model FinancialCategory {
@@ -76,6 +98,7 @@ model Savings {
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   title       String
   category    String   @default("Outros")
+  color       String   @default("#D4A017")
   description String?
   amount      Decimal  @db.Decimal(12, 2)
   date        DateTime
@@ -85,6 +108,8 @@ model Savings {
   recurrenceType RecurrenceType @default(NONE)
   recurrenceGroupId String?
   goalId      String?
+  hasYield    Boolean  @default(false)
+  yieldRateMonthly Decimal? @db.Decimal(7, 4)
   goal        FinancialGoal? @relation(fields: [goalId], references: [id], onDelete: SetNull)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -109,6 +134,11 @@ model FinancialGoal {
   startDate     DateTime
   targetDate    DateTime?
   category      String?
+  imageUrl      String?
+  imageUrls     String[]            @default([])
+  color         String              @default("#0F766E")
+  hasYield      Boolean             @default(false)
+  yieldRateMonthly Decimal?         @db.Decimal(7, 4)
   status        FinancialGoalStatus @default(ACTIVE)
   savings       Savings[]
   createdAt     DateTime            @default(now())

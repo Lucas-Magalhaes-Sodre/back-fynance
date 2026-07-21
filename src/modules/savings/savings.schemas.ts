@@ -5,6 +5,7 @@ export const recurrenceTypeSchema = z.enum(['NONE', 'DAILY', 'WEEKLY', 'MONTHLY'
 const savingsBaseSchema = z.object({
   title: z.string().min(2),
   category: z.string().min(2).optional(),
+  color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
   description: z.string().optional().nullable(),
   amount: z.coerce.number().positive(),
   date: z.coerce.date(),
@@ -20,7 +21,9 @@ const savingsBaseSchema = z.object({
     endMonth: z.coerce.number().int().min(1).max(12),
     endYear: z.coerce.number().int().min(2000).max(2100)
   }).optional(),
-  goalId: z.string().uuid().optional().nullable()
+  goalId: z.string().uuid().optional().nullable(),
+  hasYield: z.coerce.boolean().optional(),
+  yieldRateMonthly: z.coerce.number().min(0).max(100).optional().nullable()
 });
 
 export const createSavingSchema = savingsBaseSchema;
@@ -59,12 +62,15 @@ export const savingsTransferSchema = z.object({
   direction: z.enum(['SAVE_FROM_BALANCE', 'WITHDRAW_TO_BALANCE']),
   title: z.string().min(2),
   category: z.string().min(2).optional(),
+  color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
   description: z.string().optional().nullable(),
   amount: z.coerce.number().positive(),
   date: z.coerce.date(),
   month: z.coerce.number().int().min(1).max(12).optional(),
   year: z.coerce.number().int().min(2000).max(2100).optional(),
-  goalId: z.string().uuid().optional().nullable()
+  goalId: z.string().uuid().optional().nullable(),
+  hasYield: z.coerce.boolean().optional(),
+  yieldRateMonthly: z.coerce.number().min(0).max(100).optional().nullable()
 });
 
 export type CreateSavingInput = z.infer<typeof createSavingSchema>;

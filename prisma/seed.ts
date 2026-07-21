@@ -2,17 +2,27 @@ import { FinancialItemType, PrismaClient, RecurrenceType } from '@prisma/client'
 import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
+const LGPD_CONSENT_VERSION = '2026-07-21';
 
 async function main() {
   const password_hash = await bcrypt.hash('12345678', 10);
 
   const user = await prisma.user.upsert({
     where: { email: 'demo@minhareceita.com' },
-    update: {},
+    update: {
+      name: 'Usuaria Demo',
+      password_hash,
+      lgpdAcceptedAt: new Date(),
+      lgpdConsentVersion: LGPD_CONSENT_VERSION,
+      marketingConsent: false
+    },
     create: {
       name: 'Usuaria Demo',
       email: 'demo@minhareceita.com',
-      password_hash
+      password_hash,
+      lgpdAcceptedAt: new Date(),
+      lgpdConsentVersion: LGPD_CONSENT_VERSION,
+      marketingConsent: false
     }
   });
 
