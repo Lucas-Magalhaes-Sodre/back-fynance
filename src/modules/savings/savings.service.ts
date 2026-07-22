@@ -360,9 +360,9 @@ export async function getSavingsOverview(userId: string) {
   const today = endOfToday();
   const currentMonth = today.getMonth() + 1;
   const currentYear = today.getFullYear();
-  const [savings, categories, monthItems, monthlySavings] = await Promise.all([
+  const [allSavings, categories, monthItems, monthlySavings] = await Promise.all([
     prisma.savings.findMany({
-      where: { userId, date: { lte: today } },
+      where: { userId },
       orderBy: [{ category: 'asc' }, { title: 'asc' }]
     }),
     prisma.financialCategory.findMany({
@@ -378,6 +378,7 @@ export async function getSavingsOverview(userId: string) {
       _sum: { amount: true }
     })
   ]);
+  const currentSavings = allSavings.filter((saving) => saving.date <= today);
 
   const colorMap = new Map(categories.map((category) => [category.name, category.color]));
   const categoryMap = new Map<string, {
@@ -388,9 +389,10 @@ export async function getSavingsOverview(userId: string) {
     items: Map<string, { id: string; name: string; color: string; currentSavedBalance: number; rawSavedBalance: number; hasYield: boolean; yieldRateMonthly: number | null; savingIds: string[] }>;
   }>();
 
-  for (const saving of savings) {
+  for (const saving of allSavings) {
+    const isCurrent = saving.date <= today;
     const rawAmount = toNumber(saving.amount);
-    const amount = projectedSavingAmount(saving);
+    const amount = isCurrent ? projectedSavingAmount(saving) : 0;
     const category = categoryMap.get(saving.category) ?? {
       id: syntheticCategoryId(saving.category),
       name: saving.category,
@@ -410,7 +412,7 @@ export async function getSavingsOverview(userId: string) {
       savingIds: []
     };
     subItem.currentSavedBalance += amount;
-    subItem.rawSavedBalance += rawAmount;
+    subItem.rawSavedBalance += isCurrent ? rawAmount : 0;
     subItem.hasYield = subItem.hasYield || saving.hasYield;
     subItem.yieldRateMonthly = saving.hasYield ? toNumber(saving.yieldRateMonthly ?? 0) : subItem.yieldRateMonthly;
     subItem.savingIds.push(saving.id);
@@ -428,17 +430,16 @@ export async function getSavingsOverview(userId: string) {
   const monthlySavingsOpportunity = monthlyIncome - monthlyExpense - monthlyPlannedSavings;
 
   return {
-    currentSavedBalance: savings.reduce((sum, saving) => sum + projectedSavingAmount(saving), 0),
+    currentSavedBalance: currentSavings.reduce((sum, saving) => sum + projectedSavingAmount(saving), 0),
     monthlyPlannedSavings,
     monthlySavingsOpportunity: monthlySavingsOpportunity > 0 ? monthlySavingsOpportunity : 0,
     categories: Array.from(categoryMap.values())
       .map((category) => ({
         ...category,
         items: Array.from(category.items.values())
-          .filter((item) => item.currentSavedBalance !== 0)
           .sort((a, b) => b.currentSavedBalance - a.currentSavedBalance)
       }))
-      .filter((category) => category.currentSavedBalance !== 0 || category.items.length > 0)
+      .filter((category) => category.items.length > 0)
       .sort((a, b) => b.currentSavedBalance - a.currentSavedBalance)
   };
 }

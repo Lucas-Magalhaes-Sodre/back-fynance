@@ -2,6 +2,7 @@ import { FinancialGoalStatus, Prisma } from '@prisma/client';
 import { prisma } from '../../shared/prisma.js';
 import type {
   CreateFinancialGoalInput,
+  ListGoalSavingsInput,
   ListFinancialGoalsInput,
   UpdateFinancialGoalInput
 } from './financial-goal.schemas.js';
@@ -72,8 +73,14 @@ function normalizeImages(input: Pick<CreateFinancialGoalInput, 'imageUrl' | 'ima
 }
 
 async function savingsForGoal(goalId: string, userId: string) {
+  const today = new Date();
+  today.setHours(23, 59, 59, 999);
   return prisma.savings.findMany({
-    where: { goalId, userId }
+    where: {
+      goalId,
+      userId,
+      date: { lte: today }
+    }
   });
 }
 
@@ -191,4 +198,44 @@ export async function deleteFinancialGoal(userId: string, id: string) {
   }
 
   await prisma.financialGoal.delete({ where: { id } });
+}
+
+export async function listFinancialGoalSavings(userId: string, goalId: string, filters: ListGoalSavingsInput) {
+  const goal = await prisma.financialGoal.findFirst({ where: { id: goalId, userId }, select: { id: true } });
+  if (!goal) {
+    const error = new Error('Meta financeira nao encontrada') as Error & { statusCode: number };
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const page = filters.page;
+  const limit = filters.limit;
+  const skip = (page - 1) * limit;
+  const today = new Date();
+  today.setHours(23, 59, 59, 999);
+  const where = { userId, goalId };
+  const [items, total] = await Promise.all([
+    prisma.savings.findMany({
+      where,
+      orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
+      skip,
+      take: limit
+    }),
+    prisma.savings.count({ where })
+  ]);
+
+  return {
+    items: items.map((saving) => ({
+      ...saving,
+      amount: toNumber(saving.amount),
+      yieldRateMonthly: toNumber(saving.yieldRateMonthly ?? 0),
+      countsAsSaved: saving.date <= today
+    })),
+    page,
+    limit,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / limit)),
+    hasNextPage: page * limit < total,
+    hasPreviousPage: page > 1
+  };
 }
