@@ -26,6 +26,12 @@ export const listFinancialGoalsSchema = z.object({
   status: financialGoalStatusSchema.optional()
 });
 
+export const listGoalSavingsSchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(20).default(5)
+});
+
 export type CreateFinancialGoalInput = z.infer<typeof createFinancialGoalSchema>;
 export type UpdateFinancialGoalInput = z.infer<typeof updateFinancialGoalSchema>;
 export type ListFinancialGoalsInput = z.infer<typeof listFinancialGoalsSchema>;
+export type ListGoalSavingsInput = z.infer<typeof listGoalSavingsSchema>;

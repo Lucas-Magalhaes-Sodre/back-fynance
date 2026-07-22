@@ -2,12 +2,14 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   createFinancialGoalSchema,
+  listGoalSavingsSchema,
   listFinancialGoalsSchema,
   updateFinancialGoalSchema
 } from './financial-goal.schemas.js';
 import {
   createFinancialGoal,
   deleteFinancialGoal,
+  listFinancialGoalSavings,
   listFinancialGoals,
   updateFinancialGoal
 } from './financial-goal.service.js';
@@ -37,4 +39,11 @@ export async function deleteFinancialGoalController(request: FastifyRequest, rep
   const { id } = idParamsSchema.parse(request.params);
   await deleteFinancialGoal(request.user.sub, id);
   return reply.status(204).send();
+}
+
+export async function listFinancialGoalSavingsController(request: FastifyRequest, reply: FastifyReply) {
+  const { id } = idParamsSchema.parse(request.params);
+  const filters = listGoalSavingsSchema.parse(request.query);
+  const savings = await listFinancialGoalSavings(request.user.sub, id, filters);
+  return reply.send(savings);
 }
