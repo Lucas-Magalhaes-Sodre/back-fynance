@@ -20,6 +20,7 @@ const defaultCategories = [
   { name: 'Alimentação', type: FinancialItemType.EXPENSE, color: '#CA8A04' },
   { name: 'Transporte', type: FinancialItemType.EXPENSE, color: '#0891B2' },
   { name: 'Cartões de Crédito', type: FinancialItemType.EXPENSE, color: '#EA580C' },
+  { name: 'Aniversários', type: FinancialItemType.EXPENSE, color: '#EC4899' },
   { name: 'Saúde', type: FinancialItemType.EXPENSE, color: '#DB2777' },
   { name: 'Educação', type: FinancialItemType.EXPENSE, color: '#7C3AED' },
   { name: 'Assinaturas', type: FinancialItemType.EXPENSE, color: '#475569' },
@@ -57,8 +58,12 @@ function isProtectedCreditCardExpenseCategory(category: { name: string; type: Fi
   return category.type === FinancialItemType.EXPENSE && (name === 'cartao de credito' || name === 'cartoes de credito');
 }
 
+function isProtectedBirthdayExpenseCategory(category: { name: string; type: FinancialItemType }) {
+  return category.type === FinancialItemType.EXPENSE && normalizeCategoryName(category.name) === 'aniversarios';
+}
+
 function isProtectedSystemCategory(category: { name: string; type: FinancialItemType }) {
-  return isProtectedSavingsIncomeCategory(category) || isProtectedCreditCardExpenseCategory(category);
+  return isProtectedSavingsIncomeCategory(category) || isProtectedCreditCardExpenseCategory(category) || isProtectedBirthdayExpenseCategory(category);
 }
 
 async function assertUniqueCategoryName(userId: string, type: FinancialItemType, name: string, exceptId?: string) {
@@ -180,10 +185,31 @@ async function ensureCreditCardExpenseCategory(userId: string) {
   });
 }
 
+async function ensureBirthdayExpenseCategory(userId: string) {
+  const existing = await prisma.financialCategory.findFirst({
+    where: {
+      userId,
+      type: FinancialItemType.EXPENSE,
+      name: 'Aniversários'
+    }
+  });
+  if (existing) return;
+
+  await prisma.financialCategory.create({
+    data: {
+      userId,
+      name: 'Aniversários',
+      type: FinancialItemType.EXPENSE,
+      color: '#EC4899'
+    }
+  });
+}
+
 export async function listFinancialCategories(userId: string, filters: ListFinancialCategoriesInput) {
   await ensureDefaultCategories(userId);
   await ensureSavingsIncomeCategory(userId);
   await ensureCreditCardExpenseCategory(userId);
+  await ensureBirthdayExpenseCategory(userId);
   const categories = await prisma.financialCategory.findMany({
     where: {
       userId,
@@ -199,6 +225,7 @@ export async function createFinancialCategory(userId: string, input: FinancialCa
   await ensureDefaultCategories(userId);
   await ensureSavingsIncomeCategory(userId);
   await ensureCreditCardExpenseCategory(userId);
+  await ensureBirthdayExpenseCategory(userId);
   const type = normalizeType(input.type);
   const name = input.name.trim();
   await assertUniqueCategoryName(userId, type, name);
@@ -227,6 +254,7 @@ export async function updateFinancialCategory(userId: string, id: string, input:
   await ensureDefaultCategories(userId);
   await ensureSavingsIncomeCategory(userId);
   await ensureCreditCardExpenseCategory(userId);
+  await ensureBirthdayExpenseCategory(userId);
   const existing = await prisma.financialCategory.findFirst({ where: { id, userId } });
   if (!existing) {
     const error = new Error('Categoria nao encontrada') as Error & { statusCode: number };
@@ -246,6 +274,12 @@ export async function updateFinancialCategory(userId: string, id: string, input:
 
   if (isProtectedCreditCardExpenseCategory(existing) && changesProtectedIdentity) {
     const error = new Error('A categoria Cartoes de Credito e obrigatoria e nao pode mudar de tipo') as Error & { statusCode: number };
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (isProtectedBirthdayExpenseCategory(existing) && changesProtectedIdentity) {
+    const error = new Error('A categoria Aniversarios e obrigatoria e nao pode mudar de tipo') as Error & { statusCode: number };
     error.statusCode = 400;
     throw error;
   }
@@ -290,6 +324,7 @@ export async function deleteFinancialCategory(userId: string, id: string) {
   await ensureDefaultCategories(userId);
   await ensureSavingsIncomeCategory(userId);
   await ensureCreditCardExpenseCategory(userId);
+  await ensureBirthdayExpenseCategory(userId);
   const existing = await prisma.financialCategory.findFirst({ where: { id, userId } });
   if (!existing) {
     const error = new Error('Categoria nao encontrada') as Error & { statusCode: number };

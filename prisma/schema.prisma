@@ -39,6 +39,12 @@ enum FinancialGoalStatus {
   CANCELED
 }
 
+enum ReminderStatus {
+  PENDING
+  READ
+  DISMISSED
+}
+
 model User {
   id            String          @id @default(uuid())
   name          String
@@ -57,9 +63,26 @@ model User {
   goals         FinancialGoal[]
   creditCards   CreditCard[]
   creditCardPurchases CreditCardPurchase[]
+  reminders     FinancialReminder[]
+  pushTokens    PushToken[]
   financialCategoriesInitialized Boolean @default(false)
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
+}
+
+model PushToken {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token      String   @unique
+  platform   String?
+  deviceName String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId])
+  @@index([isActive])
 }
 
 model CookieConsent {
@@ -167,6 +190,7 @@ model FinancialItem {
   isFixed     Boolean           @default(false)
   recurrenceType RecurrenceType @default(NONE)
   recurrenceGroupId String?
+  reminders   FinancialReminder[]
   date        DateTime
   month       Int
   year        Int
@@ -181,6 +205,28 @@ model FinancialItem {
   @@index([userId, year])
   @@index([userId, year, month])
   @@index([userId, date])
+}
+
+model FinancialReminder {
+  id              String         @id @default(uuid())
+  userId          String
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  financialItemId String
+  financialItem   FinancialItem  @relation(fields: [financialItemId], references: [id], onDelete: Cascade)
+  title           String
+  message         String?
+  remindAt        DateTime
+  offsetDays      Int?
+  status          ReminderStatus @default(PENDING)
+  sentAt          DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([userId])
+  @@index([financialItemId])
+  @@index([remindAt])
+  @@index([sentAt])
+  @@index([userId, status, remindAt])
 }
 
 model CreditCard {

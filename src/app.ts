@@ -11,7 +11,9 @@ import { financialControlRoutes, financialSummaryRoutes } from './modules/financ
 import { financialGoalRoutes } from './modules/financial-goals/financial-goal.routes.js';
 import { financialInsightsRoutes } from './modules/financial-insights/financial-insights.routes.js';
 import { financialItemRoutes } from './modules/financial-items/financial-item.routes.js';
+import { financialReminderRoutes } from './modules/financial-reminders/financial-reminder.routes.js';
 import { privacyRoutes } from './modules/privacy/privacy.routes.js';
+import { pushNotificationRoutes } from './modules/push-notifications/push-notification.routes.js';
 import { savingsRoutes } from './modules/savings/savings.routes.js';
 import { userRoutes } from './modules/users/user.routes.js';
 import { env } from './shared/env.js';
@@ -44,9 +46,11 @@ export function buildApp() {
   app.get('/health', async () => ({ status: 'ok', message: 'Backend is running' }));
   app.register(authRoutes, { prefix: '/auth' });
   app.register(privacyRoutes, { prefix: '/privacy' });
+  app.register(pushNotificationRoutes, { prefix: '/push-notifications' });
   app.register(userRoutes, { prefix: '/users' });
   app.register(creditCardRoutes, { prefix: '/credit-cards' });
   app.register(financialItemRoutes, { prefix: '/financial-items' });
+  app.register(financialReminderRoutes, { prefix: '/financial-reminders' });
   app.register(financialCategoryRoutes, { prefix: '/financial-categories' });
   app.register(savingsRoutes, { prefix: '/savings' });
   app.register(financialCalendarRoutes, { prefix: '/financial-calendar' });
