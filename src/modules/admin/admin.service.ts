@@ -76,9 +76,39 @@ function legacySnapshotPrice(user: { subscriptionPlan: 'FREE' | 'MONTHLY' | 'YEA
   return { price: 0, duration: 1 };
 }
 
+function adminLifetimeAccessData() {
+  return {
+    subscriptionStatus: 'ACTIVE' as const,
+    subscriptionPlan: 'LIFETIME' as const,
+    trialEndsAt: null,
+    manualAccessUntil: null,
+    accessBlockedAt: null,
+    paymentProvider: 'NONE' as const,
+    providerSubscriptionId: null,
+    billingPlanId: null,
+    planNameSnapshot: 'Vitalício',
+    planPriceSnapshot: 0,
+    planDurationMonthsSnapshot: null,
+    couponCodeSnapshot: null,
+    couponDiscountSnapshot: null,
+    subscriptionCurrentPeriodEnd: null
+  };
+}
+
 export async function assertAdmin(userId: string) {
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
-  if (user?.role === 'ADMIN') return;
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { role: true, subscriptionStatus: true, subscriptionPlan: true }
+  });
+  if (user?.role === 'ADMIN') {
+    if (user.subscriptionStatus !== 'ACTIVE' || user.subscriptionPlan !== 'LIFETIME') {
+      await prisma.user.update({
+        where: { id: userId },
+        data: adminLifetimeAccessData()
+      });
+    }
+    return;
+  }
   const error = new Error('Acesso administrativo necessario') as Error & { statusCode: number };
   error.statusCode = 403;
   throw error;
@@ -213,6 +243,9 @@ export async function updateAppSettings(input: AppSettingsInput) {
 }
 
 export async function updateAdminUserSubscription(userId: string, input: AdminUpdateSubscriptionInput) {
+  const currentUser = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+  const nextRole = input.role ?? currentUser?.role ?? 'USER';
+  const adminAccessData = nextRole === 'ADMIN' ? adminLifetimeAccessData() : {};
   const user = await prisma.user.update({
     where: { id: userId },
     data: {
@@ -221,7 +254,8 @@ export async function updateAdminUserSubscription(userId: string, input: AdminUp
       trialEndsAt: input.trialEndsAt,
       manualAccessUntil: input.manualAccessUntil,
       accessBlockedAt: input.accessBlockedAt,
-      subscriptionPlan: input.subscriptionPlan
+      subscriptionPlan: input.subscriptionPlan,
+      ...adminAccessData
     },
     select: adminUserSelect
   });

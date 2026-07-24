@@ -80,6 +80,25 @@ function sanitizeUser(user: {
   };
 }
 
+function adminLifetimeAccessData() {
+  return {
+    subscriptionStatus: 'ACTIVE' as const,
+    subscriptionPlan: 'LIFETIME' as const,
+    trialEndsAt: null,
+    manualAccessUntil: null,
+    accessBlockedAt: null,
+    paymentProvider: 'NONE' as const,
+    providerSubscriptionId: null,
+    billingPlanId: null,
+    planNameSnapshot: 'Vitalício',
+    planPriceSnapshot: 0,
+    planDurationMonthsSnapshot: null,
+    couponCodeSnapshot: null,
+    couponDiscountSnapshot: null,
+    subscriptionCurrentPeriodEnd: null
+  };
+}
+
 export async function registerUser(app: FastifyInstance, input: RegisterInput) {
   const exists = await prisma.user.findUnique({ where: { email: input.email } });
   if (exists) {
@@ -161,7 +180,8 @@ export async function loginWithGoogle(app: FastifyInstance, input: GoogleLoginIn
       data: adminRole === 'ADMIN'
         ? {
           role: 'ADMIN',
-          password_hash: await bcrypt.hash(`google-admin:${payload.sub}:${Date.now()}`, 10)
+          password_hash: await bcrypt.hash(`google-admin:${payload.sub}:${Date.now()}`, 10),
+          ...adminLifetimeAccessData()
         }
         : {},
     })
@@ -174,7 +194,9 @@ export async function loginWithGoogle(app: FastifyInstance, input: GoogleLoginIn
       lgpdConsentVersion: LGPD_CONSENT_VERSION,
       marketingConsent: false,
       role: adminRole,
-      trialEndsAt: trialEndDateWithDays(defaultTrialDays)
+      ...(adminRole === 'ADMIN'
+        ? adminLifetimeAccessData()
+        : { trialEndsAt: trialEndDateWithDays(defaultTrialDays) })
     }
   });
 
