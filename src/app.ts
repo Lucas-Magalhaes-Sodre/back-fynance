@@ -3,6 +3,8 @@ import jwt from '@fastify/jwt';
 import fastify from 'fastify';
 import { ZodError } from 'zod';
 import { authRoutes } from './modules/auth/auth.routes.js';
+import { adminRoutes } from './modules/admin/admin.routes.js';
+import { billingRoutes } from './modules/billing/billing.routes.js';
 import { creditCardRoutes } from './modules/credit-cards/credit-card.routes.js';
 import { financialCalendarRoutes } from './modules/financial-calendar/financial-calendar.routes.js';
 import { financialCategoryRoutes } from './modules/financial-categories/financial-category.routes.js';
@@ -45,6 +47,8 @@ export function buildApp() {
 
   app.get('/health', async () => ({ status: 'ok', message: 'Backend is running' }));
   app.register(authRoutes, { prefix: '/auth' });
+  app.register(billingRoutes, { prefix: '/billing' });
+  app.register(adminRoutes, { prefix: '/admin' });
   app.register(privacyRoutes, { prefix: '/privacy' });
   app.register(pushNotificationRoutes, { prefix: '/push-notifications' });
   app.register(userRoutes, { prefix: '/users' });

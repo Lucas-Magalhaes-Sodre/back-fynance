@@ -1,6 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { forgotPasswordSchema, loginSchema, registerSchema } from './auth.schemas.js';
-import { loginUser, registerUser, requestPasswordRecovery } from './auth.service.js';
+import { forgotPasswordSchema, googleLoginSchema, loginSchema, registerSchema } from './auth.schemas.js';
+import { loginUser, loginWithGoogle, registerUser, requestPasswordRecovery } from './auth.service.js';
 
 export async function registerController(request: FastifyRequest, reply: FastifyReply) {
   const data = registerSchema.parse(request.body);
@@ -20,3 +20,8 @@ export async function forgotPasswordController(request: FastifyRequest, reply: F
   return reply.send(result);
 }
 
+export async function googleLoginController(request: FastifyRequest, reply: FastifyReply) {
+  const data = googleLoginSchema.parse(request.body);
+  const result = await loginWithGoogle(request.server, data);
+  return reply.send(result);
+}

@@ -45,6 +45,33 @@ enum ReminderStatus {
   DISMISSED
 }
 
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  BLOCKED
+  MANUAL
+}
+
+enum PaymentProvider {
+  NONE
+  MERCADO_PAGO
+  STRIPE
+}
+
+enum SubscriptionPlan {
+  FREE
+  MONTHLY
+  YEARLY
+  LIFETIME
+}
+
 model User {
   id            String          @id @default(uuid())
   name          String
@@ -57,6 +84,17 @@ model User {
   lgpdConsentVersion String?
   marketingConsent Boolean @default(false)
   dataDeletionRequestedAt DateTime?
+  role          UserRole        @default(USER)
+  subscriptionStatus SubscriptionStatus @default(TRIALING)
+  trialEndsAt   DateTime?
+  manualAccessUntil DateTime?
+  accessBlockedAt DateTime?
+  paymentProvider PaymentProvider @default(NONE)
+  providerCustomerId String?
+  providerSubscriptionId String?
+  subscriptionPlan SubscriptionPlan @default(FREE)
+  subscriptionCurrentPeriodEnd DateTime?
+  lastPaymentAt DateTime?
   items         FinancialItem[]
   categories    FinancialCategory[]
   savings       Savings[]
@@ -65,9 +103,33 @@ model User {
   creditCardPurchases CreditCardPurchase[]
   reminders     FinancialReminder[]
   pushTokens    PushToken[]
+  subscriptionEvents SubscriptionEvent[]
   financialCategoriesInitialized Boolean @default(false)
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
+}
+
+model SubscriptionEvent {
+  id        String          @id @default(uuid())
+  userId    String?
+  user      User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  provider  PaymentProvider
+  eventType String
+  providerEventId String?
+  payload   Json
+  createdAt DateTime        @default(now())
+
+  @@index([userId])
+  @@index([provider])
+  @@index([eventType])
+  @@index([createdAt])
+}
+
+model AppSetting {
+  key       String   @id
+  value     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model PushToken {
