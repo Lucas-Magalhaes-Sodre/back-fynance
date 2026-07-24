@@ -2,13 +2,46 @@ import { PaymentProvider, SubscriptionPlan, SubscriptionStatus } from '@prisma/c
 import { env } from '../../shared/env.js';
 import { prisma } from '../../shared/prisma.js';
 import { accessInfo } from './access.service.js';
-import type { CheckoutInput } from './billing.schemas.js';
+import type { CheckoutInput, CouponValidationInput } from './billing.schemas.js';
 
 const mercadoPagoApiUrl = 'https://api.mercadopago.com';
 
-function planPrice(plan: SubscriptionPlan) {
-  if (plan === 'YEARLY') return 238.9;
-  return 24.9;
+function publicPlan(plan: {
+  id: string;
+  name: string;
+  description: string | null;
+  price: unknown;
+  currency: string;
+  durationMonths: number;
+  active: boolean;
+  sortOrder: number;
+  createdAt: Date;
+  updatedAt: Date;
+}) {
+  return {
+    ...plan,
+    price: Number(plan.price)
+  };
+}
+
+function legacyPlanCode(durationMonths: number): SubscriptionPlan {
+  if (durationMonths >= 12) return 'YEARLY';
+  if (durationMonths <= 0) return 'FREE';
+  return 'MONTHLY';
+}
+
+function normalizeCouponCode(code?: string | null) {
+  return (code ?? '').trim().toUpperCase();
+}
+
+function applyDiscount(price: number, coupon: { discountType: 'PERCENT' | 'FIXED'; discountValue: unknown }) {
+  const discountValue = Number(coupon.discountValue);
+  const discount = coupon.discountType === 'PERCENT' ? price * (discountValue / 100) : discountValue;
+  const normalizedDiscount = Math.min(price, Math.max(0, discount));
+  return {
+    discountAmount: Number(normalizedDiscount.toFixed(2)),
+    finalPrice: Number(Math.max(0, price - normalizedDiscount).toFixed(2))
+  };
 }
 
 function subscriptionStatusFromMercadoPago(status?: string): SubscriptionStatus {
@@ -33,6 +66,12 @@ export async function getBillingStatus(userId: string) {
       providerCustomerId: true,
       providerSubscriptionId: true,
       subscriptionPlan: true,
+      billingPlanId: true,
+      planNameSnapshot: true,
+      planPriceSnapshot: true,
+      planDurationMonthsSnapshot: true,
+      couponCodeSnapshot: true,
+      couponDiscountSnapshot: true,
       subscriptionCurrentPeriodEnd: true,
       lastPaymentAt: true
     }
@@ -43,7 +82,92 @@ export async function getBillingStatus(userId: string) {
     throw error;
   }
 
-  return { ...user, access: accessInfo(user) };
+  return {
+    ...user,
+    planPriceSnapshot: user.planPriceSnapshot ? Number(user.planPriceSnapshot) : null,
+    couponDiscountSnapshot: user.couponDiscountSnapshot ? Number(user.couponDiscountSnapshot) : null,
+    access: accessInfo(user)
+  };
+}
+
+export async function listPublicBillingPlans() {
+  const plans = await prisma.billingPlan.findMany({
+    where: { active: true },
+    orderBy: [{ sortOrder: 'asc' }, { price: 'asc' }, { createdAt: 'asc' }]
+  });
+  return plans.map(publicPlan);
+}
+
+async function resolveCoupon(planId: string, couponCode?: string | null) {
+  const code = normalizeCouponCode(couponCode);
+  if (!code) return null;
+
+  const now = new Date();
+  const coupon = await prisma.billingCoupon.findUnique({ where: { code } });
+  if (
+    !coupon ||
+    !coupon.active ||
+    (coupon.startsAt && coupon.startsAt > now) ||
+    (coupon.expiresAt && coupon.expiresAt < now) ||
+    (coupon.usageLimit !== null && coupon.usedCount >= coupon.usageLimit) ||
+    (coupon.billingPlanId && coupon.billingPlanId !== planId)
+  ) {
+    const error = new Error('Cupom invalido ou indisponivel para este plano') as Error & { statusCode: number };
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return coupon;
+}
+
+export async function validateBillingCoupon(input: CouponValidationInput) {
+  const plan = await prisma.billingPlan.findFirst({ where: { id: input.planId, active: true } });
+  if (!plan) {
+    const error = new Error('Plano indisponivel') as Error & { statusCode: number };
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const coupon = await resolveCoupon(plan.id, input.couponCode);
+  if (!coupon) {
+    const error = new Error('Informe um cupom') as Error & { statusCode: number };
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const price = Number(plan.price);
+  const discount = applyDiscount(price, coupon);
+  return {
+    code: coupon.code,
+    description: coupon.description,
+    discountType: coupon.discountType,
+    discountValue: Number(coupon.discountValue),
+    originalPrice: price,
+    ...discount
+  };
+}
+
+async function resolveCheckoutPlan(input: CheckoutInput) {
+  if (input.planId) {
+    const plan = await prisma.billingPlan.findFirst({ where: { id: input.planId, active: true } });
+    if (!plan) {
+      const error = new Error('Plano indisponivel') as Error & { statusCode: number };
+      error.statusCode = 404;
+      throw error;
+    }
+    return plan;
+  }
+
+  const legacyDurationMonths = input.plan === 'YEARLY' ? 12 : 1;
+  const plan = await prisma.billingPlan.findFirst({
+    where: { durationMonths: legacyDurationMonths, active: true },
+    orderBy: [{ sortOrder: 'asc' }, { price: 'asc' }]
+  });
+  if (plan) return plan;
+
+  const error = new Error('Nenhum plano ativo encontrado') as Error & { statusCode: number };
+  error.statusCode = 404;
+  throw error;
 }
 
 export async function createCheckout(userId: string, input: CheckoutInput) {
@@ -60,10 +184,15 @@ export async function createCheckout(userId: string, input: CheckoutInput) {
     throw error;
   }
 
+  const plan = await resolveCheckoutPlan(input);
+  const coupon = await resolveCoupon(plan.id, input.couponCode);
+  const originalPrice = Number(plan.price);
+  const discount = coupon ? applyDiscount(originalPrice, coupon) : { discountAmount: 0, finalPrice: originalPrice };
+  const legacyCode = legacyPlanCode(plan.durationMonths);
   const configuredPlanUrl =
-    input.plan === 'MONTHLY' ? env.MERCADO_PAGO_MONTHLY_PLAN_URL : env.MERCADO_PAGO_YEARLY_PLAN_URL;
+    legacyCode === 'MONTHLY' ? env.MERCADO_PAGO_MONTHLY_PLAN_URL : legacyCode === 'YEARLY' ? env.MERCADO_PAGO_YEARLY_PLAN_URL : undefined;
   if (configuredPlanUrl && !env.MERCADO_PAGO_ACCESS_TOKEN) {
-    return { provider: input.provider, plan: input.plan, url: configuredPlanUrl };
+    return { provider: input.provider, planId: plan.id, planName: plan.name, url: configuredPlanUrl };
   }
 
   if (!env.MERCADO_PAGO_ACCESS_TOKEN) {
@@ -72,7 +201,7 @@ export async function createCheckout(userId: string, input: CheckoutInput) {
     throw error;
   }
 
-  const frequency = input.plan === 'YEARLY' ? 12 : 1;
+  const frequency = Math.max(1, plan.durationMonths);
   const response = await fetch(`${mercadoPagoApiUrl}/preapproval`, {
     method: 'POST',
     headers: {
@@ -80,14 +209,14 @@ export async function createCheckout(userId: string, input: CheckoutInput) {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      reason: `Minha Receita - plano ${input.plan === 'YEARLY' ? 'anual' : 'mensal'}`,
-      external_reference: user.id,
+      reason: `Deluket Finance - ${plan.name}${coupon ? ` - cupom ${coupon.code}` : ''}`,
+      external_reference: `${user.id}:${plan.id}:${coupon?.id ?? ''}`,
       payer_email: user.email,
       back_url: `${env.WEB_ORIGIN}/app/billing`,
       auto_recurring: {
         frequency,
         frequency_type: 'months',
-        transaction_amount: planPrice(input.plan),
+        transaction_amount: discount.finalPrice,
         currency_id: 'BRL'
       },
       status: 'pending'
@@ -106,11 +235,30 @@ export async function createCheckout(userId: string, input: CheckoutInput) {
     data: {
       paymentProvider: 'MERCADO_PAGO',
       providerSubscriptionId: data.id ?? null,
-      subscriptionPlan: input.plan
+      subscriptionPlan: legacyCode,
+      billingPlanId: plan.id,
+      planNameSnapshot: plan.name,
+      planPriceSnapshot: discount.finalPrice,
+      planDurationMonthsSnapshot: plan.durationMonths,
+      couponCodeSnapshot: coupon?.code,
+      couponDiscountSnapshot: coupon ? discount.discountAmount : null
     }
   });
 
-  return { provider: input.provider, plan: input.plan, url: data.init_point };
+  if (coupon) {
+    await prisma.billingCoupon.update({ where: { id: coupon.id }, data: { usedCount: { increment: 1 } } });
+  }
+
+  return {
+    provider: input.provider,
+    planId: plan.id,
+    planName: plan.name,
+    originalPrice,
+    discountAmount: discount.discountAmount,
+    finalPrice: discount.finalPrice,
+    couponCode: coupon?.code ?? null,
+    url: data.init_point
+  };
 }
 
 async function mercadoPagoGet(path: string) {
@@ -136,8 +284,9 @@ export async function processMercadoPagoWebhook(payload: unknown, query: Record<
   }
 
   const externalReference = String(providerPayload?.external_reference ?? body.external_reference ?? '');
+  const [externalUserId, externalPlanId, externalCouponId] = externalReference.split(':');
   const providerSubscriptionId = String(providerPayload?.id ?? providerEventId ?? '');
-  const userId = externalReference || null;
+  const userId = externalUserId || null;
 
   await prisma.subscriptionEvent.create({
     data: {
@@ -153,13 +302,26 @@ export async function processMercadoPagoWebhook(payload: unknown, query: Record<
 
   const status = subscriptionStatusFromMercadoPago(providerPayload?.status);
   const approvedPayment = providerPayload?.status === 'approved';
+  const plan = externalPlanId ? await prisma.billingPlan.findUnique({ where: { id: externalPlanId } }) : null;
+  const coupon = externalCouponId ? await prisma.billingCoupon.findUnique({ where: { id: externalCouponId } }) : null;
+  const durationMonths = plan?.durationMonths ?? providerPayload?.auto_recurring?.frequency ?? 1;
+  const providerAmount = providerPayload?.auto_recurring?.transaction_amount ?? providerPayload?.transaction_amount;
+  const finalPrice = providerAmount !== undefined ? Number(providerAmount) : plan ? Number(plan.price) : undefined;
+  const originalPrice = plan ? Number(plan.price) : finalPrice;
+  const discountAmount = coupon && originalPrice !== undefined && finalPrice !== undefined ? Math.max(0, originalPrice - finalPrice) : undefined;
   await prisma.user.update({
     where: { id: userId },
     data: {
       paymentProvider: 'MERCADO_PAGO',
       providerSubscriptionId: providerSubscriptionId || undefined,
       subscriptionStatus: approvedPayment ? 'ACTIVE' : status,
-      subscriptionPlan: providerPayload?.auto_recurring?.frequency === 12 ? 'YEARLY' : undefined,
+      subscriptionPlan: legacyPlanCode(durationMonths),
+      billingPlanId: plan?.id,
+      planNameSnapshot: plan?.name,
+      planPriceSnapshot: finalPrice,
+      planDurationMonthsSnapshot: plan?.durationMonths,
+      couponCodeSnapshot: coupon?.code,
+      couponDiscountSnapshot: discountAmount,
       lastPaymentAt: approvedPayment ? new Date() : undefined,
       accessBlockedAt: approvedPayment || status === 'ACTIVE' ? null : undefined
     }

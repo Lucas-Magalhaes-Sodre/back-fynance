@@ -41,11 +41,35 @@ const userSelect = {
   providerCustomerId: true,
   providerSubscriptionId: true,
   subscriptionPlan: true,
+  billingPlanId: true,
+  planNameSnapshot: true,
+  planPriceSnapshot: true,
+  planDurationMonthsSnapshot: true,
+  couponCodeSnapshot: true,
+  couponDiscountSnapshot: true,
   subscriptionCurrentPeriodEnd: true,
   lastPaymentAt: true,
   createdAt: true,
   updatedAt: true
 };
+
+function serializeUser(user: {
+  role: Parameters<typeof accessInfo>[0]['role'];
+  subscriptionStatus: Parameters<typeof accessInfo>[0]['subscriptionStatus'];
+  trialEndsAt: Date | null;
+  manualAccessUntil: Date | null;
+  accessBlockedAt: Date | null;
+  subscriptionCurrentPeriodEnd: Date | null;
+  planPriceSnapshot?: unknown | null;
+  [key: string]: unknown;
+}) {
+  return {
+    ...user,
+    planPriceSnapshot: user.planPriceSnapshot ? Number(user.planPriceSnapshot) : null,
+    couponDiscountSnapshot: user.couponDiscountSnapshot ? Number(user.couponDiscountSnapshot) : null,
+    access: accessInfo(user)
+  };
+}
 
 export async function meController(request: FastifyRequest, reply: FastifyReply) {
   const user = await prisma.user.findUnique({
@@ -57,7 +81,7 @@ export async function meController(request: FastifyRequest, reply: FastifyReply)
     return reply.status(404).send({ message: 'Usuario nao encontrado' });
   }
 
-  return reply.send({ user: { ...user, access: accessInfo(user) } });
+  return reply.send({ user: serializeUser(user) });
 }
 
 export async function updateProfileController(request: FastifyRequest, reply: FastifyReply) {
@@ -68,7 +92,7 @@ export async function updateProfileController(request: FastifyRequest, reply: Fa
     select: userSelect
   });
 
-  return reply.send({ user: { ...user, access: accessInfo(user) } });
+  return reply.send({ user: serializeUser(user) });
 }
 
 export async function updatePrivacyConsentController(request: FastifyRequest, reply: FastifyReply) {
@@ -83,7 +107,7 @@ export async function updatePrivacyConsentController(request: FastifyRequest, re
     select: userSelect
   });
 
-  return reply.send({ user: { ...user, access: accessInfo(user) } });
+  return reply.send({ user: serializeUser(user) });
 }
 
 export async function exportMyDataController(request: FastifyRequest, reply: FastifyReply) {
@@ -111,7 +135,7 @@ export async function exportMyDataController(request: FastifyRequest, reply: Fas
   }
 
   return reply
-    .header('Content-Disposition', 'attachment; filename="minha-receita-dados.json"')
+    .header('Content-Disposition', 'attachment; filename="deluket-finance-dados.json"')
     .send({
       exportedAt: new Date().toISOString(),
       privacy: {

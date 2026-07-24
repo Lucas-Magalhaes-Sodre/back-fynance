@@ -86,6 +86,13 @@ function installmentForMonth(
   };
 }
 
+function activePurchaseAmount(purchase: { amount: Prisma.Decimal; installments: number; skippedInstallments?: number[] }) {
+  const installments = Math.max(1, purchase.installments);
+  const skipped = purchase.skippedInstallments?.length ?? 0;
+  const activeInstallments = Math.max(0, installments - skipped);
+  return (toNumber(purchase.amount) / installments) * activeInstallments;
+}
+
 function periodsForPurchase(purchase: { purchaseDate: Date; installments: number }) {
   const periods: Array<{ year: number; month: number }> = [];
   const startYear = purchase.purchaseDate.getFullYear();
@@ -247,9 +254,10 @@ export async function listCreditCards(userId: string, filters: ListCreditCardsIn
         return [{ ...serializePurchase(purchase), ...installment }];
       });
       const detailedAmount = monthPurchases.reduce((sum, purchase) => sum + purchase.installmentAmount, 0);
-      const statementAmount = cardStatementItems
+      const syncedStatementAmount = cardStatementItems
         .filter((item) => item.month === summaryMonth)
         .reduce((sum, item) => sum + toNumber(item.amount), 0);
+      const statementAmount = Math.max(syncedStatementAmount, detailedAmount);
       const otherAmount = Math.max(statementAmount - detailedAmount, 0);
 
       return {
@@ -268,14 +276,15 @@ export async function listCreditCards(userId: string, filters: ListCreditCardsIn
     const otherAmount = Math.max(statementAmount - detailedAmount, 0);
     const yearStatementAmount = monthlySummary.reduce((sum, summary) => sum + summary.statementAmount, 0);
     const creditLimit = card.creditLimit ? toNumber(card.creditLimit) : null;
+    const usedAmount = cardPurchases.reduce((sum, purchase) => sum + activePurchaseAmount(purchase), 0);
 
     return {
       ...serializeCard(card),
       statementAmount,
       detailedAmount,
       otherAmount,
-      usedAmount: statementAmount,
-      usedPercent: creditLimit && creditLimit > 0 ? Math.min((statementAmount / creditLimit) * 100, 100) : null,
+      usedAmount,
+      usedPercent: creditLimit && creditLimit > 0 ? Math.min((usedAmount / creditLimit) * 100, 100) : null,
       yearStatementAmount,
       monthlySummary,
       monthPurchases
