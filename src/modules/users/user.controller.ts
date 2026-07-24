@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { prisma } from '../../shared/prisma.js';
 import { LGPD_CONSENT_VERSION } from '../auth/auth.service.js';
+import { accessInfo } from '../billing/access.service.js';
 
 const profileSchema = z.object({
   name: z.string().min(2),
@@ -31,6 +32,17 @@ const userSelect = {
   lgpdConsentVersion: true,
   marketingConsent: true,
   dataDeletionRequestedAt: true,
+  role: true,
+  subscriptionStatus: true,
+  trialEndsAt: true,
+  manualAccessUntil: true,
+  accessBlockedAt: true,
+  paymentProvider: true,
+  providerCustomerId: true,
+  providerSubscriptionId: true,
+  subscriptionPlan: true,
+  subscriptionCurrentPeriodEnd: true,
+  lastPaymentAt: true,
   createdAt: true,
   updatedAt: true
 };
@@ -45,7 +57,7 @@ export async function meController(request: FastifyRequest, reply: FastifyReply)
     return reply.status(404).send({ message: 'Usuario nao encontrado' });
   }
 
-  return reply.send({ user });
+  return reply.send({ user: { ...user, access: accessInfo(user) } });
 }
 
 export async function updateProfileController(request: FastifyRequest, reply: FastifyReply) {
@@ -56,7 +68,7 @@ export async function updateProfileController(request: FastifyRequest, reply: Fa
     select: userSelect
   });
 
-  return reply.send({ user });
+  return reply.send({ user: { ...user, access: accessInfo(user) } });
 }
 
 export async function updatePrivacyConsentController(request: FastifyRequest, reply: FastifyReply) {
@@ -71,7 +83,7 @@ export async function updatePrivacyConsentController(request: FastifyRequest, re
     select: userSelect
   });
 
-  return reply.send({ user });
+  return reply.send({ user: { ...user, access: accessInfo(user) } });
 }
 
 export async function exportMyDataController(request: FastifyRequest, reply: FastifyReply) {

@@ -1,4 +1,4 @@
-import { FinancialItemType, PrismaClient, RecurrenceType } from '@prisma/client';
+import { FinancialItemType, PrismaClient, RecurrenceType, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
@@ -14,7 +14,8 @@ async function main() {
       password_hash,
       lgpdAcceptedAt: new Date(),
       lgpdConsentVersion: LGPD_CONSENT_VERSION,
-      marketingConsent: false
+      marketingConsent: false,
+      role: UserRole.ADMIN
     },
     create: {
       name: 'Usuaria Demo',
@@ -22,7 +23,8 @@ async function main() {
       password_hash,
       lgpdAcceptedAt: new Date(),
       lgpdConsentVersion: LGPD_CONSENT_VERSION,
-      marketingConsent: false
+      marketingConsent: false,
+      role: UserRole.ADMIN
     }
   });
 

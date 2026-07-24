@@ -17,6 +17,11 @@ export const forgotPasswordSchema = z.object({
   email: z.string().email()
 });
 
+export const googleLoginSchema = z.object({
+  idToken: z.string().min(20)
+});
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
+export type GoogleLoginInput = z.infer<typeof googleLoginSchema>;
