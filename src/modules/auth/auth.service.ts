@@ -28,6 +28,12 @@ function sanitizeUser(user: {
   providerCustomerId?: string | null;
   providerSubscriptionId?: string | null;
   subscriptionPlan?: 'FREE' | 'MONTHLY' | 'YEARLY' | 'LIFETIME';
+  billingPlanId?: string | null;
+  planNameSnapshot?: string | null;
+  planPriceSnapshot?: unknown | null;
+  planDurationMonthsSnapshot?: number | null;
+  couponCodeSnapshot?: string | null;
+  couponDiscountSnapshot?: unknown | null;
   subscriptionCurrentPeriodEnd?: Date | null;
   lastPaymentAt?: Date | null;
   createdAt: Date;
@@ -60,6 +66,12 @@ function sanitizeUser(user: {
     providerCustomerId: user.providerCustomerId ?? null,
     providerSubscriptionId: user.providerSubscriptionId ?? null,
     subscriptionPlan: user.subscriptionPlan ?? 'FREE',
+    billingPlanId: user.billingPlanId ?? null,
+    planNameSnapshot: user.planNameSnapshot ?? null,
+    planPriceSnapshot: user.planPriceSnapshot ? Number(user.planPriceSnapshot) : null,
+    planDurationMonthsSnapshot: user.planDurationMonthsSnapshot ?? null,
+    couponCodeSnapshot: user.couponCodeSnapshot ?? null,
+    couponDiscountSnapshot: user.couponDiscountSnapshot ? Number(user.couponDiscountSnapshot) : null,
     subscriptionCurrentPeriodEnd: user.subscriptionCurrentPeriodEnd ?? null,
     lastPaymentAt: user.lastPaymentAt ?? null,
     access,
@@ -76,6 +88,12 @@ export async function registerUser(app: FastifyInstance, input: RegisterInput) {
     throw error;
   }
 
+  if (roleForEmail(input.email) === 'ADMIN') {
+    const error = new Error('Este e-mail administrativo deve entrar com Google para confirmar a posse do e-mail.') as Error & { statusCode: number };
+    error.statusCode = 400;
+    throw error;
+  }
+
   const password_hash = await bcrypt.hash(input.password, 10);
   const defaultTrialDays = await getDefaultTrialDays();
   const user = await prisma.user.create({
@@ -86,7 +104,7 @@ export async function registerUser(app: FastifyInstance, input: RegisterInput) {
       lgpdAcceptedAt: new Date(),
       lgpdConsentVersion: LGPD_CONSENT_VERSION,
       marketingConsent: input.marketingConsent,
-      role: roleForEmail(input.email),
+      role: 'USER',
       trialEndsAt: trialEndDateWithDays(defaultTrialDays)
     }
   });
@@ -134,9 +152,20 @@ export async function loginWithGoogle(app: FastifyInstance, input: GoogleLoginIn
     throw error;
   }
 
+  const adminRole = roleForEmail(email);
   const existing = await prisma.user.findUnique({ where: { email } });
   const defaultTrialDays = await getDefaultTrialDays();
-  const user = existing ?? await prisma.user.create({
+  const user = existing
+    ? await prisma.user.update({
+      where: { id: existing.id },
+      data: adminRole === 'ADMIN'
+        ? {
+          role: 'ADMIN',
+          password_hash: await bcrypt.hash(`google-admin:${payload.sub}:${Date.now()}`, 10)
+        }
+        : {},
+    })
+    : await prisma.user.create({
     data: {
       name: payload.name ?? email.split('@')[0],
       email,
@@ -144,7 +173,7 @@ export async function loginWithGoogle(app: FastifyInstance, input: GoogleLoginIn
       lgpdAcceptedAt: new Date(),
       lgpdConsentVersion: LGPD_CONSENT_VERSION,
       marketingConsent: false,
-      role: roleForEmail(email),
+      role: adminRole,
       trialEndsAt: trialEndDateWithDays(defaultTrialDays)
     }
   });

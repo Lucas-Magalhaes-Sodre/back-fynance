@@ -1,5 +1,7 @@
 import cors from '@fastify/cors';
+import helmet from '@fastify/helmet';
 import jwt from '@fastify/jwt';
+import rateLimit from '@fastify/rate-limit';
 import fastify from 'fastify';
 import { ZodError } from 'zod';
 import { authRoutes } from './modules/auth/auth.routes.js';
@@ -29,6 +31,15 @@ export function buildApp() {
     credentials: true
   });
 
+  app.register(helmet, {
+    contentSecurityPolicy: false
+  });
+  app.register(rateLimit, {
+    global: false,
+    max: 300,
+    timeWindow: '1 minute'
+  });
+
   app.register(jwt, { secret: env.JWT_SECRET });
 
   app.setErrorHandler((error, _request, reply) => {
@@ -39,9 +50,10 @@ export function buildApp() {
       });
     }
 
-    const statusCode = error.statusCode ?? 500;
+    const handledError = error as Error & { statusCode?: number };
+    const statusCode = handledError.statusCode ?? 500;
     return reply.status(statusCode).send({
-      message: statusCode === 500 ? 'Erro interno do servidor' : error.message
+      message: statusCode === 500 ? 'Erro interno do servidor' : handledError.message
     });
   });
 

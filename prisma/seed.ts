@@ -5,6 +5,7 @@ const prisma = new PrismaClient();
 const LGPD_CONSENT_VERSION = '2026-07-21';
 
 async function main() {
+  const isProduction = process.env.NODE_ENV === 'production';
   const password_hash = await bcrypt.hash('12345678', 10);
 
   const user = await prisma.user.upsert({
@@ -15,7 +16,7 @@ async function main() {
       lgpdAcceptedAt: new Date(),
       lgpdConsentVersion: LGPD_CONSENT_VERSION,
       marketingConsent: false,
-      role: UserRole.ADMIN
+      role: isProduction ? UserRole.USER : UserRole.ADMIN
     },
     create: {
       name: 'Usuaria Demo',
@@ -24,7 +25,7 @@ async function main() {
       lgpdAcceptedAt: new Date(),
       lgpdConsentVersion: LGPD_CONSENT_VERSION,
       marketingConsent: false,
-      role: UserRole.ADMIN
+      role: isProduction ? UserRole.USER : UserRole.ADMIN
     }
   });
 

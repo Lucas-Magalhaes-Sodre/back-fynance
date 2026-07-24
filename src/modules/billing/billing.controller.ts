@@ -1,7 +1,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { getDefaultTrialDays } from '../admin/admin.service.js';
-import { checkoutSchema } from './billing.schemas.js';
-import { createCheckout, getBillingStatus, processMercadoPagoWebhook } from './billing.service.js';
+import { checkoutSchema, couponValidationSchema } from './billing.schemas.js';
+import { createCheckout, getBillingStatus, listPublicBillingPlans, processMercadoPagoWebhook, validateBillingCoupon } from './billing.service.js';
 
 export async function billingStatusController(request: FastifyRequest, reply: FastifyReply) {
   const billing = await getBillingStatus(request.user.sub);
@@ -14,8 +14,19 @@ export async function createCheckoutController(request: FastifyRequest, reply: F
   return reply.send({ checkout });
 }
 
+export async function listPublicBillingPlansController(_request: FastifyRequest, reply: FastifyReply) {
+  const plans = await listPublicBillingPlans();
+  return reply.send({ plans });
+}
+
+export async function validateBillingCouponController(request: FastifyRequest, reply: FastifyReply) {
+  const data = couponValidationSchema.parse(request.body);
+  const coupon = await validateBillingCoupon(data);
+  return reply.send({ coupon });
+}
+
 export async function mercadoPagoWebhookController(request: FastifyRequest, reply: FastifyReply) {
-  const result = await processMercadoPagoWebhook(request.body, request.query as Record<string, unknown>);
+  const result = await processMercadoPagoWebhook(request.body, request.query as Record<string, unknown>, request.headers);
   return reply.send(result);
 }
 

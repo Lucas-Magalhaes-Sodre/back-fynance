@@ -19,6 +19,35 @@ export const appSettingsSchema = z.object({
   defaultTrialDays: z.coerce.number().int().min(0).max(3650)
 });
 
+export const billingPlanSchema = z.object({
+  name: z.string().trim().min(2).max(80),
+  description: z.string().trim().max(240).optional().nullable(),
+  price: z.coerce.number().min(0).max(999999),
+  currency: z.string().trim().min(3).max(3).default('BRL'),
+  durationMonths: z.coerce.number().int().min(1).max(120),
+  active: z.boolean().default(true),
+  sortOrder: z.coerce.number().int().min(0).max(9999).default(0)
+});
+
+export const billingPlanOrderSchema = z.object({
+  planIds: z.array(z.string().min(1)).min(1)
+});
+
+export const billingCouponSchema = z.object({
+  code: z.string().trim().min(2).max(40),
+  description: z.string().trim().max(240).optional().nullable(),
+  discountType: z.enum(['PERCENT', 'FIXED']),
+  discountValue: z.coerce.number().min(0).max(999999),
+  active: z.boolean().default(true),
+  startsAt: z.coerce.date().optional().nullable(),
+  expiresAt: z.coerce.date().optional().nullable(),
+  usageLimit: z.coerce.number().int().min(1).max(100000).optional().nullable(),
+  billingPlanId: z.string().min(1).optional().nullable()
+});
+
 export type AdminUpdateSubscriptionInput = z.infer<typeof adminUpdateSubscriptionSchema>;
 export type GrantTrialInput = z.infer<typeof grantTrialSchema>;
 export type AppSettingsInput = z.infer<typeof appSettingsSchema>;
+export type BillingPlanInput = z.infer<typeof billingPlanSchema>;
+export type BillingPlanOrderInput = z.infer<typeof billingPlanOrderSchema>;
+export type BillingCouponInput = z.infer<typeof billingCouponSchema>;
