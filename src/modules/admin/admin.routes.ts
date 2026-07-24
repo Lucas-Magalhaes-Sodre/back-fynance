@@ -8,6 +8,7 @@ import {
   deactivateAdminBillingPlanController,
   getAppSettingsController,
   grantTrialController,
+  listAdminAuditLogsController,
   listAdminBillingCouponsController,
   listAdminBillingPlansController,
   listAdminUsersController,
@@ -30,6 +31,7 @@ export async function adminRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticateAdmin);
 
   app.get('/subscriptions/users', listAdminUsersController);
+  app.get('/audit-logs', listAdminAuditLogsController);
   app.get('/subscriptions/overview', adminBillingOverviewController);
   app.get('/subscriptions/plans', listAdminBillingPlansController);
   app.post('/subscriptions/plans', createAdminBillingPlanController);

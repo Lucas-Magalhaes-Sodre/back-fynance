@@ -84,6 +84,36 @@ export async function assertAdmin(userId: string) {
   throw error;
 }
 
+export async function assertCanDemoteAdmin(userId: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+  if (user?.role !== 'ADMIN') return;
+
+  const adminCount = await prisma.user.count({ where: { role: 'ADMIN' } });
+  if (adminCount > 1) return;
+
+  const error = new Error('Nao e possivel remover o ultimo administrador do sistema') as Error & { statusCode: number };
+  error.statusCode = 400;
+  throw error;
+}
+
+export async function createAdminAuditLog(input: {
+  actorUserId?: string | null;
+  action: string;
+  targetType: string;
+  targetId?: string | null;
+  payload?: object | null;
+}) {
+  return prisma.adminAuditLog.create({
+    data: {
+      actorUserId: input.actorUserId ?? null,
+      action: input.action,
+      targetType: input.targetType,
+      targetId: input.targetId ?? null,
+      payload: input.payload ?? undefined
+    }
+  });
+}
+
 export async function listAdminUsers(input: { page: number; pageSize: number }) {
   const page = Math.max(1, input.page);
   const pageSize = Math.min(100, Math.max(5, input.pageSize));
@@ -99,6 +129,38 @@ export async function listAdminUsers(input: { page: number; pageSize: number }) 
 
   return {
     users: users.map(withAccess),
+    pagination: {
+      page,
+      pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize))
+    }
+  };
+}
+
+export async function listAdminAuditLogs(input: { page: number; pageSize: number }) {
+  const page = Math.max(1, input.page);
+  const pageSize = Math.min(100, Math.max(5, input.pageSize));
+  const [logs, total] = await prisma.$transaction([
+    prisma.adminAuditLog.findMany({
+      include: {
+        actor: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' },
+      skip: (page - 1) * pageSize,
+      take: pageSize
+    }),
+    prisma.adminAuditLog.count()
+  ]);
+
+  return {
+    logs,
     pagination: {
       page,
       pageSize,

@@ -11,6 +11,7 @@ const envSchema = z.object({
   MERCADO_PAGO_ACCESS_TOKEN: z.string().optional(),
   MERCADO_PAGO_MONTHLY_PLAN_URL: z.string().url().optional(),
   MERCADO_PAGO_YEARLY_PLAN_URL: z.string().url().optional(),
+  MERCADO_PAGO_WEBHOOK_SECRET: z.string().optional(),
   ADMIN_EMAILS: z.string().optional(),
   GOOGLE_CLIENT_ID: z.string().optional()
 });

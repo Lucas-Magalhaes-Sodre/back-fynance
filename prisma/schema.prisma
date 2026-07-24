@@ -116,6 +116,7 @@ model User {
   reminders     FinancialReminder[]
   pushTokens    PushToken[]
   subscriptionEvents SubscriptionEvent[]
+  adminAuditLogs AdminAuditLog[]
   financialCategoriesInitialized Boolean @default(false)
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
@@ -134,6 +135,22 @@ model SubscriptionEvent {
   @@index([userId])
   @@index([provider])
   @@index([eventType])
+  @@index([createdAt])
+}
+
+model AdminAuditLog {
+  id          String   @id @default(uuid())
+  actorUserId String?
+  actor       User?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  action      String
+  targetType  String
+  targetId    String?
+  payload     Json?
+  createdAt   DateTime @default(now())
+
+  @@index([actorUserId])
+  @@index([action])
+  @@index([targetType])
   @@index([createdAt])
 }
 

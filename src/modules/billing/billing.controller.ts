@@ -26,7 +26,7 @@ export async function validateBillingCouponController(request: FastifyRequest, r
 }
 
 export async function mercadoPagoWebhookController(request: FastifyRequest, reply: FastifyReply) {
-  const result = await processMercadoPagoWebhook(request.body, request.query as Record<string, unknown>);
+  const result = await processMercadoPagoWebhook(request.body, request.query as Record<string, unknown>, request.headers);
   return reply.send(result);
 }
 

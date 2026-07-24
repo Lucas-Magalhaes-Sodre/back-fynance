@@ -1,4 +1,6 @@
 import { PaymentProvider, SubscriptionPlan, SubscriptionStatus } from '@prisma/client';
+import { createHmac, timingSafeEqual } from 'node:crypto';
+import type { IncomingHttpHeaders } from 'node:http';
 import { env } from '../../shared/env.js';
 import { prisma } from '../../shared/prisma.js';
 import { accessInfo } from './access.service.js';
@@ -49,6 +51,55 @@ function subscriptionStatusFromMercadoPago(status?: string): SubscriptionStatus 
   if (status === 'cancelled' || status === 'paused') return 'CANCELED';
   if (status === 'pending' || status === 'in_process') return 'PAST_DUE';
   return 'TRIALING';
+}
+
+function firstHeaderValue(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function stringValue(value: unknown) {
+  return typeof value === 'string' || typeof value === 'number' ? String(value) : '';
+}
+
+function parseMercadoPagoSignature(signatureHeader: string | undefined) {
+  if (!signatureHeader) return null;
+
+  return signatureHeader.split(',').reduce<Record<string, string>>((acc, part) => {
+    const [key, value] = part.split('=').map((item) => item.trim());
+    if (key && value) acc[key] = value;
+    return acc;
+  }, {});
+}
+
+function assertMercadoPagoWebhookSignature(input: {
+  body: Record<string, any>;
+  query: Record<string, unknown>;
+  headers?: IncomingHttpHeaders;
+}) {
+  if (!env.MERCADO_PAGO_WEBHOOK_SECRET) return;
+
+  const signature = parseMercadoPagoSignature(firstHeaderValue(input.headers?.['x-signature']));
+  const requestId = firstHeaderValue(input.headers?.['x-request-id']);
+  const timestamp = signature?.ts;
+  const receivedSignature = signature?.v1;
+  const dataId = stringValue(input.query['data.id'] ?? input.body.data?.id ?? input.query.id);
+
+  if (!requestId || !timestamp || !receivedSignature || !dataId) {
+    const error = new Error('Assinatura do Mercado Pago ausente ou incompleta') as Error & { statusCode: number };
+    error.statusCode = 401;
+    throw error;
+  }
+
+  const manifest = `id:${dataId};request-id:${requestId};ts:${timestamp};`;
+  const expectedSignature = createHmac('sha256', env.MERCADO_PAGO_WEBHOOK_SECRET).update(manifest).digest('hex');
+  const expectedBuffer = Buffer.from(expectedSignature, 'hex');
+  const receivedBuffer = Buffer.from(receivedSignature, 'hex');
+
+  if (expectedBuffer.length !== receivedBuffer.length || !timingSafeEqual(expectedBuffer, receivedBuffer)) {
+    const error = new Error('Assinatura do Mercado Pago invalida') as Error & { statusCode: number };
+    error.statusCode = 401;
+    throw error;
+  }
 }
 
 export async function getBillingStatus(userId: string) {
@@ -270,33 +321,50 @@ async function mercadoPagoGet(path: string) {
   return response.json() as Promise<Record<string, any>>;
 }
 
-export async function processMercadoPagoWebhook(payload: unknown, query: Record<string, unknown>) {
-  const body = payload as Record<string, any>;
+export async function processMercadoPagoWebhook(payload: unknown, query: Record<string, unknown>, headers?: IncomingHttpHeaders) {
+  const body = (payload && typeof payload === 'object' ? payload : {}) as Record<string, any>;
+  assertMercadoPagoWebhookSignature({ body, query, headers });
+
   const eventType = String(body.type ?? body.action ?? query.type ?? query.topic ?? 'unknown');
-  const providerEventId = String(body.id ?? body.data?.id ?? query.id ?? '');
+  const providerEventId = String(query['data.id'] ?? body.data?.id ?? query.id ?? body.id ?? '');
 
   let providerPayload: Record<string, any> | null = null;
-  if (providerEventId && eventType.includes('preapproval')) {
+  const normalizedEventType = eventType.toLowerCase();
+  if (providerEventId && normalizedEventType.includes('preapproval')) {
     providerPayload = await mercadoPagoGet(`/preapproval/${providerEventId}`);
   }
-  if (providerEventId && eventType.includes('payment')) {
+  if (providerEventId && normalizedEventType.includes('payment')) {
     providerPayload = await mercadoPagoGet(`/v1/payments/${providerEventId}`);
   }
 
-  const externalReference = String(providerPayload?.external_reference ?? body.external_reference ?? '');
-  const [externalUserId, externalPlanId, externalCouponId] = externalReference.split(':');
-  const providerSubscriptionId = String(providerPayload?.id ?? providerEventId ?? '');
-  const userId = externalUserId || null;
-
   await prisma.subscriptionEvent.create({
     data: {
-      userId,
+      userId: null,
       provider: 'MERCADO_PAGO',
       eventType,
       providerEventId: providerEventId || null,
       payload: (providerPayload ?? body) as object
     }
   });
+
+  if (!providerPayload) return { ok: true, ignored: true };
+
+  const externalReference = String(providerPayload.external_reference ?? '');
+  const [externalUserId, externalPlanId, externalCouponId] = externalReference.split(':');
+  const providerSubscriptionId = String(providerPayload?.id ?? providerEventId ?? '');
+  const userId = externalUserId || null;
+
+  if (userId) {
+    await prisma.subscriptionEvent.updateMany({
+      where: {
+        provider: 'MERCADO_PAGO',
+        providerEventId: providerEventId || null,
+        eventType,
+        userId: null
+      },
+      data: { userId }
+    });
+  }
 
   if (!userId) return { ok: true };
 
