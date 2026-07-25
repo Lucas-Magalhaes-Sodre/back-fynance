@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { authenticate } from '../users/authenticate.js';
 import {
   adminBillingOverviewController,
+  anonymizeAdminUserController,
   createAdminBillingCouponController,
   createAdminBillingPlanController,
   deactivateAdminBillingCouponController,
@@ -46,5 +47,6 @@ export async function adminRoutes(app: FastifyInstance) {
   app.put('/settings', updateAppSettingsController);
   app.patch('/subscriptions/users/:userId', updateAdminUserSubscriptionController);
   app.post('/subscriptions/users/:userId/grant-trial', grantTrialController);
+  app.post('/subscriptions/users/:userId/anonymize', anonymizeAdminUserController);
   app.get('/subscriptions/events', listSubscriptionEventsController);
 }

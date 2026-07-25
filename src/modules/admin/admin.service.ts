@@ -1,7 +1,7 @@
 import { prisma } from '../../shared/prisma.js';
 import { env } from '../../shared/env.js';
 import { accessInfo } from '../billing/access.service.js';
-import type { AdminUpdateSubscriptionInput, AppSettingsInput, BillingCouponInput, BillingPlanInput, BillingPlanOrderInput, GrantTrialInput } from './admin.schemas.js';
+import type { AdminUpdateSubscriptionInput, AnonymizeUserInput, AppSettingsInput, BillingCouponInput, BillingPlanInput, BillingPlanOrderInput, GrantTrialInput } from './admin.schemas.js';
 
 const adminUserSelect = {
   id: true,
@@ -144,17 +144,39 @@ export async function createAdminAuditLog(input: {
   });
 }
 
-export async function listAdminUsers(input: { page: number; pageSize: number }) {
+export async function listAdminUsers(input: {
+  page: number;
+  pageSize: number;
+  search?: string;
+  subscriptionStatus?: 'TRIALING' | 'ACTIVE' | 'PAST_DUE' | 'CANCELED' | 'BLOCKED' | 'MANUAL';
+  role?: 'USER' | 'ADMIN';
+  billingPlanId?: string;
+}) {
   const page = Math.max(1, input.page);
   const pageSize = Math.min(100, Math.max(5, input.pageSize));
+  const search = input.search?.trim();
+  const where = {
+    ...(search
+      ? {
+        OR: [
+          { name: { contains: search, mode: 'insensitive' as const } },
+          { email: { contains: search, mode: 'insensitive' as const } }
+        ]
+      }
+      : {}),
+    ...(input.subscriptionStatus ? { subscriptionStatus: input.subscriptionStatus } : {}),
+    ...(input.role ? { role: input.role } : {}),
+    ...(input.billingPlanId ? { billingPlanId: input.billingPlanId } : {})
+  };
   const [users, total] = await prisma.$transaction([
     prisma.user.findMany({
+      where,
       select: adminUserSelect,
       orderBy: { createdAt: 'desc' },
       skip: (page - 1) * pageSize,
       take: pageSize
     }),
-    prisma.user.count()
+    prisma.user.count({ where })
   ]);
 
   return {
@@ -210,6 +232,10 @@ export async function getAdminBillingOverview() {
   const users = await prisma.user.findMany({ select: adminUserSelect });
   const activeUsers = users.filter((user) => withAccess(user).access.hasPaidAccess);
   const trialUsers = users.filter((user) => withAccess(user).access.hasTrialAccess);
+  const now = new Date();
+  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const paidThisMonthUsers = users.filter((user) => user.lastPaymentAt && user.lastPaymentAt >= currentMonthStart && user.lastPaymentAt < nextMonthStart);
   const plans = await prisma.billingPlan.findMany({ where: { active: true }, orderBy: [{ sortOrder: 'asc' }, { price: 'asc' }] });
   const defaultPlan = plans[0];
   const defaultMonthlyPrice = defaultPlan ? Number(defaultPlan.price) / Math.max(1, defaultPlan.durationMonths) : 0;
@@ -220,6 +246,13 @@ export async function getAdminBillingOverview() {
     return total + price / Math.max(1, duration);
   }, 0);
   const realizedRevenueEstimate = activeUsers.reduce((total, user) => total + Number(user.planPriceSnapshot ?? legacySnapshotPrice(user).price), 0);
+  const currentMonthRevenue = paidThisMonthUsers.reduce((total, user) => total + Number(user.planPriceSnapshot ?? legacySnapshotPrice(user).price), 0);
+  const currentMonthMonthlyRevenueIncrease = paidThisMonthUsers.reduce((total, user) => {
+    const legacy = legacySnapshotPrice(user);
+    const price = Number(user.planPriceSnapshot ?? legacy.price);
+    const duration = user.planDurationMonthsSnapshot ?? legacy.duration;
+    return total + price / Math.max(1, duration);
+  }, 0);
 
   return {
     usersTotal: users.length,
@@ -228,6 +261,9 @@ export async function getAdminBillingOverview() {
     blockedUsers: users.filter((user) => user.subscriptionStatus === 'BLOCKED').length,
     currentMonthlyRecurringRevenue: monthlyRecurringRevenue,
     realizedRevenueEstimate,
+    currentMonthRevenue,
+    currentMonthNewPaidPlans: paidThisMonthUsers.length,
+    currentMonthMonthlyRevenueIncrease,
     projectedTrialRevenue: trialUsers.length * defaultMonthlyPrice,
     defaultTrialDays: await getDefaultTrialDays()
   };
@@ -270,6 +306,70 @@ export async function updateAdminUserSubscription(userId: string, input: AdminUp
   });
 
   return withAccess(user);
+}
+
+export async function anonymizeAdminUser(userId: string, input: AnonymizeUserInput) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, email: true, role: true }
+  });
+  if (!user) {
+    const error = new Error('Usuario nao encontrado') as Error & { statusCode: number };
+    error.statusCode = 404;
+    throw error;
+  }
+  if (user.email.toLowerCase() !== input.confirmationEmail.trim().toLowerCase()) {
+    const error = new Error('E-mail de confirmacao nao confere com o usuario selecionado') as Error & { statusCode: number };
+    error.statusCode = 400;
+    throw error;
+  }
+  if (user.role === 'ADMIN') {
+    await assertCanDemoteAdmin(user.id);
+  }
+
+  const anonymizedEmail = `anonimizado-${user.id}@deluket.invalid`;
+  const anonymized = await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      name: 'Usuario anonimizado',
+      email: anonymizedEmail,
+      password_hash: `anonimizado:${user.id}:${Date.now()}`,
+      phone: null,
+      city: null,
+      occupation: null,
+      marketingConsent: false,
+      dataDeletionRequestedAt: new Date(),
+      role: 'USER',
+      subscriptionStatus: 'BLOCKED',
+      trialEndsAt: null,
+      manualAccessUntil: null,
+      accessBlockedAt: new Date(),
+      paymentProvider: 'NONE',
+      providerCustomerId: null,
+      providerSubscriptionId: null,
+      subscriptionPlan: 'FREE',
+      subscriptionCurrentPeriodEnd: null,
+      lastPaymentAt: null,
+      billingPlanId: null,
+      planNameSnapshot: null,
+      planPriceSnapshot: null,
+      planDurationMonthsSnapshot: null,
+      couponCodeSnapshot: null,
+      couponDiscountSnapshot: null
+    },
+    select: adminUserSelect
+  });
+
+  await prisma.subscriptionEvent.create({
+    data: {
+      userId: user.id,
+      provider: 'NONE',
+      eventType: 'ADMIN_USER_ANONYMIZED',
+      payload: { previousEmail: user.email, note: input.note ?? null }
+    }
+  });
+
+  return withAccess(anonymized);
 }
 
 export async function listAdminBillingPlans() {
