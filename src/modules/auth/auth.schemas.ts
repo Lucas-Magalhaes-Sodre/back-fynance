@@ -5,6 +5,8 @@ export const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
   lgpdAccepted: z.literal(true),
+  termsAccepted: z.literal(true),
+  privacyAccepted: z.literal(true),
   marketingConsent: z.boolean().optional().default(false)
 });
 
@@ -18,7 +20,8 @@ export const forgotPasswordSchema = z.object({
 });
 
 export const googleLoginSchema = z.object({
-  idToken: z.string().min(20)
+  idToken: z.string().min(20),
+  legalAccepted: z.literal(true).optional()
 });
 
 export type RegisterInput = z.infer<typeof registerSchema>;

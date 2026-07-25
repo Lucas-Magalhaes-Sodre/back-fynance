@@ -2,6 +2,7 @@ import { PaymentProvider, SubscriptionPlan, SubscriptionStatus } from '@prisma/c
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { IncomingHttpHeaders } from 'node:http';
 import { env } from '../../shared/env.js';
+import { CANCELLATION_VERSION, PRIVACY_VERSION, TERMS_VERSION } from '../../shared/legal.js';
 import { prisma } from '../../shared/prisma.js';
 import { accessInfo } from './access.service.js';
 import type { CheckoutInput, CouponValidationInput } from './billing.schemas.js';
@@ -221,7 +222,41 @@ async function resolveCheckoutPlan(input: CheckoutInput) {
   throw error;
 }
 
-export async function createCheckout(userId: string, input: CheckoutInput) {
+async function recordSubscriptionTermsAcceptance(input: {
+  userId: string;
+  plan: Awaited<ReturnType<typeof resolveCheckoutPlan>>;
+  originalPrice: number;
+  discount: { discountAmount: number; finalPrice: number };
+  couponCode?: string | null;
+  provider: PaymentProvider;
+  metadata?: { ipAddress?: string; userAgent?: string | string[] };
+}) {
+  await prisma.subscriptionTermsAcceptance.create({
+    data: {
+      userId: input.userId,
+      billingPlanId: input.plan.id,
+      planName: input.plan.name,
+      planPrice: input.originalPrice,
+      planCurrency: input.plan.currency,
+      planDurationMonths: input.plan.durationMonths,
+      couponCode: input.couponCode ?? null,
+      discountAmount: input.discount.discountAmount,
+      finalPrice: input.discount.finalPrice,
+      paymentProvider: input.provider,
+      termsVersion: TERMS_VERSION,
+      privacyVersion: PRIVACY_VERSION,
+      cancellationVersion: CANCELLATION_VERSION,
+      ipAddress: input.metadata?.ipAddress ?? null,
+      userAgent: Array.isArray(input.metadata?.userAgent) ? input.metadata?.userAgent[0] : input.metadata?.userAgent ?? null
+    }
+  });
+}
+
+export async function createCheckout(
+  userId: string,
+  input: CheckoutInput,
+  metadata?: { ipAddress?: string; userAgent?: string | string[] }
+) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) {
     const error = new Error('Usuario nao encontrado') as Error & { statusCode: number };
@@ -243,6 +278,15 @@ export async function createCheckout(userId: string, input: CheckoutInput) {
   const configuredPlanUrl =
     legacyCode === 'MONTHLY' ? env.MERCADO_PAGO_MONTHLY_PLAN_URL : legacyCode === 'YEARLY' ? env.MERCADO_PAGO_YEARLY_PLAN_URL : undefined;
   if (configuredPlanUrl && !env.MERCADO_PAGO_ACCESS_TOKEN) {
+    await recordSubscriptionTermsAcceptance({
+      userId: user.id,
+      plan,
+      originalPrice,
+      discount,
+      couponCode: coupon?.code,
+      provider: 'MERCADO_PAGO',
+      metadata
+    });
     return { provider: input.provider, planId: plan.id, planName: plan.name, url: configuredPlanUrl };
   }
 
@@ -294,6 +338,16 @@ export async function createCheckout(userId: string, input: CheckoutInput) {
       couponCodeSnapshot: coupon?.code,
       couponDiscountSnapshot: coupon ? discount.discountAmount : null
     }
+  });
+
+  await recordSubscriptionTermsAcceptance({
+    userId: user.id,
+    plan,
+    originalPrice,
+    discount,
+    couponCode: coupon?.code,
+    provider: 'MERCADO_PAGO',
+    metadata
   });
 
   if (coupon) {

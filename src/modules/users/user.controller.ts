@@ -2,7 +2,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { prisma } from '../../shared/prisma.js';
-import { LGPD_CONSENT_VERSION } from '../auth/auth.service.js';
+import { COOKIES_VERSION, LGPD_CONSENT_VERSION, PRIVACY_VERSION, TERMS_VERSION } from '../../shared/legal.js';
 import { accessInfo } from '../billing/access.service.js';
 
 const profileSchema = z.object({
@@ -30,6 +30,10 @@ const userSelect = {
   occupation: true,
   lgpdAcceptedAt: true,
   lgpdConsentVersion: true,
+  termsAcceptedAt: true,
+  termsVersion: true,
+  privacyVersion: true,
+  cookiesVersion: true,
   marketingConsent: true,
   dataDeletionRequestedAt: true,
   role: true,
@@ -102,6 +106,10 @@ export async function updatePrivacyConsentController(request: FastifyRequest, re
     data: {
       lgpdAcceptedAt: new Date(),
       lgpdConsentVersion: LGPD_CONSENT_VERSION,
+      termsAcceptedAt: new Date(),
+      termsVersion: TERMS_VERSION,
+      privacyVersion: PRIVACY_VERSION,
+      cookiesVersion: COOKIES_VERSION,
       marketingConsent: data.marketingConsent
     },
     select: userSelect
@@ -142,6 +150,10 @@ export async function exportMyDataController(request: FastifyRequest, reply: Fas
         legalBasis: 'Execucao de contrato e consentimento do titular',
         consentVersion: user.lgpdConsentVersion,
         lgpdAcceptedAt: user.lgpdAcceptedAt,
+        termsAcceptedAt: user.termsAcceptedAt,
+        termsVersion: user.termsVersion,
+        privacyVersion: user.privacyVersion,
+        cookiesVersion: user.cookiesVersion,
         marketingConsent: user.marketingConsent
       },
       user,
