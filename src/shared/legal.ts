@@ -1,0 +1,5 @@
+export const LGPD_CONSENT_VERSION = '2026-07-21';
+export const TERMS_VERSION = '2026-07-24';
+export const PRIVACY_VERSION = '2026-07-24';
+export const COOKIES_VERSION = '2026-07-24';
+export const CANCELLATION_VERSION = '2026-07-24';

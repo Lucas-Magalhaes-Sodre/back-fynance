@@ -3,11 +3,10 @@ import type { FastifyInstance } from 'fastify';
 import { OAuth2Client } from 'google-auth-library';
 import { prisma } from '../../shared/prisma.js';
 import { env } from '../../shared/env.js';
+import { COOKIES_VERSION, LGPD_CONSENT_VERSION, PRIVACY_VERSION, TERMS_VERSION } from '../../shared/legal.js';
 import { accessInfo, roleForEmail, trialEndDateWithDays } from '../billing/access.service.js';
 import { getDefaultTrialDays } from '../admin/admin.service.js';
 import type { ForgotPasswordInput, GoogleLoginInput, LoginInput, RegisterInput } from './auth.schemas.js';
-
-export const LGPD_CONSENT_VERSION = '2026-07-21';
 
 function sanitizeUser(user: {
   id: string;
@@ -18,6 +17,10 @@ function sanitizeUser(user: {
   occupation?: string | null;
   lgpdAcceptedAt?: Date | null;
   lgpdConsentVersion?: string | null;
+  termsAcceptedAt?: Date | null;
+  termsVersion?: string | null;
+  privacyVersion?: string | null;
+  cookiesVersion?: string | null;
   marketingConsent?: boolean;
   role?: 'USER' | 'ADMIN';
   subscriptionStatus?: 'TRIALING' | 'ACTIVE' | 'PAST_DUE' | 'CANCELED' | 'BLOCKED' | 'MANUAL';
@@ -56,6 +59,10 @@ function sanitizeUser(user: {
     occupation: user.occupation ?? null,
     lgpdAcceptedAt: user.lgpdAcceptedAt ?? null,
     lgpdConsentVersion: user.lgpdConsentVersion ?? null,
+    termsAcceptedAt: user.termsAcceptedAt ?? null,
+    termsVersion: user.termsVersion ?? null,
+    privacyVersion: user.privacyVersion ?? null,
+    cookiesVersion: user.cookiesVersion ?? null,
     marketingConsent: user.marketingConsent ?? false,
     role: user.role ?? 'USER',
     subscriptionStatus: user.subscriptionStatus ?? 'TRIALING',
@@ -122,6 +129,10 @@ export async function registerUser(app: FastifyInstance, input: RegisterInput) {
       password_hash,
       lgpdAcceptedAt: new Date(),
       lgpdConsentVersion: LGPD_CONSENT_VERSION,
+      termsAcceptedAt: new Date(),
+      termsVersion: TERMS_VERSION,
+      privacyVersion: PRIVACY_VERSION,
+      cookiesVersion: COOKIES_VERSION,
       marketingConsent: input.marketingConsent,
       role: 'USER',
       trialEndsAt: trialEndDateWithDays(defaultTrialDays)
@@ -173,6 +184,11 @@ export async function loginWithGoogle(app: FastifyInstance, input: GoogleLoginIn
 
   const adminRole = roleForEmail(email);
   const existing = await prisma.user.findUnique({ where: { email } });
+  if (!existing && input.legalAccepted !== true) {
+    const error = new Error('Para criar a conta com Google, aceite os Termos de Uso e a Politica de Privacidade.') as Error & { statusCode: number };
+    error.statusCode = 400;
+    throw error;
+  }
   const defaultTrialDays = await getDefaultTrialDays();
   const user = existing
     ? await prisma.user.update({
@@ -192,6 +208,10 @@ export async function loginWithGoogle(app: FastifyInstance, input: GoogleLoginIn
       password_hash: await bcrypt.hash(`google:${payload.sub}:${Date.now()}`, 10),
       lgpdAcceptedAt: new Date(),
       lgpdConsentVersion: LGPD_CONSENT_VERSION,
+      termsAcceptedAt: new Date(),
+      termsVersion: TERMS_VERSION,
+      privacyVersion: PRIVACY_VERSION,
+      cookiesVersion: COOKIES_VERSION,
       marketingConsent: false,
       role: adminRole,
       ...(adminRole === 'ADMIN'

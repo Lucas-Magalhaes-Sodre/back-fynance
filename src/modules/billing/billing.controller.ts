@@ -10,7 +10,10 @@ export async function billingStatusController(request: FastifyRequest, reply: Fa
 
 export async function createCheckoutController(request: FastifyRequest, reply: FastifyReply) {
   const data = checkoutSchema.parse(request.body);
-  const checkout = await createCheckout(request.user.sub, data);
+  const checkout = await createCheckout(request.user.sub, data, {
+    ipAddress: request.ip,
+    userAgent: request.headers['user-agent']
+  });
   return reply.send({ checkout });
 }
 
