@@ -1,7 +1,8 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { adminUpdateSubscriptionSchema, appSettingsSchema, billingCouponSchema, billingPlanOrderSchema, billingPlanSchema, grantTrialSchema } from './admin.schemas.js';
+import { adminUpdateSubscriptionSchema, anonymizeUserSchema, appSettingsSchema, billingCouponSchema, billingPlanOrderSchema, billingPlanSchema, grantTrialSchema } from './admin.schemas.js';
 import {
+  anonymizeAdminUser,
   assertCanDemoteAdmin,
   createAdminAuditLog,
   createAdminBillingCoupon,
@@ -29,7 +30,11 @@ const couponParamsSchema = z.object({ couponId: z.string().uuid() });
 const eventsQuerySchema = z.object({ userId: z.string().uuid().optional() });
 const usersQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(5).max(100).default(20)
+  pageSize: z.coerce.number().int().min(5).max(100).default(20),
+  search: z.string().trim().max(120).optional(),
+  subscriptionStatus: z.enum(['TRIALING', 'ACTIVE', 'PAST_DUE', 'CANCELED', 'BLOCKED', 'MANUAL']).optional(),
+  role: z.enum(['USER', 'ADMIN']).optional(),
+  billingPlanId: z.string().min(1).optional()
 });
 const auditLogsQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -78,6 +83,23 @@ export async function grantTrialController(request: FastifyRequest, reply: Fasti
     targetType: 'USER',
     targetId: userId,
     payload: data
+  });
+  return reply.send({ user });
+}
+
+export async function anonymizeAdminUserController(request: FastifyRequest, reply: FastifyReply) {
+  const { userId } = userParamsSchema.parse(request.params);
+  if (userId === request.user.sub) {
+    return reply.status(400).send({ message: 'Voce nao pode anonimizar seu proprio usuario.' });
+  }
+  const data = anonymizeUserSchema.parse(request.body);
+  const user = await anonymizeAdminUser(userId, data);
+  await createAdminAuditLog({
+    actorUserId: request.user.sub,
+    action: 'ADMIN_USER_ANONYMIZE',
+    targetType: 'USER',
+    targetId: userId,
+    payload: { confirmationEmail: data.confirmationEmail, note: data.note ?? null }
   });
   return reply.send({ user });
 }

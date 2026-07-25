@@ -45,7 +45,13 @@ export const billingCouponSchema = z.object({
   billingPlanId: z.string().min(1).optional().nullable()
 });
 
+export const anonymizeUserSchema = z.object({
+  confirmationEmail: z.string().email(),
+  note: z.string().trim().max(500).optional()
+});
+
 export type AdminUpdateSubscriptionInput = z.infer<typeof adminUpdateSubscriptionSchema>;
+export type AnonymizeUserInput = z.infer<typeof anonymizeUserSchema>;
 export type GrantTrialInput = z.infer<typeof grantTrialSchema>;
 export type AppSettingsInput = z.infer<typeof appSettingsSchema>;
 export type BillingPlanInput = z.infer<typeof billingPlanSchema>;
