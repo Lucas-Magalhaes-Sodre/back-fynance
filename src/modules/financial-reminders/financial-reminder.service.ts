@@ -11,7 +11,8 @@ const maxRemindersPerItem = 3;
 function serializeReminder(reminder: {
   id: string;
   userId: string;
-  financialItemId: string;
+  financialItemId: string | null;
+  savingId: string | null;
   title: string;
   message: string | null;
   remindAt: Date;
@@ -21,6 +22,7 @@ function serializeReminder(reminder: {
   createdAt: Date;
   updatedAt: Date;
   financialItem?: unknown;
+  saving?: unknown;
 }) {
   return reminder;
 }
@@ -37,11 +39,28 @@ async function assertFinancialItemOwner(userId: string, financialItemId: string)
   throw error;
 }
 
-async function assertReminderLimit(userId: string, financialItemId: string, exceptId?: string) {
+async function assertSavingOwner(userId: string, savingId: string) {
+  const saving = await prisma.savings.findFirst({
+    where: { id: savingId, userId },
+    select: { id: true }
+  });
+  if (saving) return;
+
+  const error = new Error('Economia nao encontrada') as Error & { statusCode: number };
+  error.statusCode = 404;
+  throw error;
+}
+
+async function assertReminderLimit(
+  userId: string,
+  target: { financialItemId?: string | null; savingId?: string | null },
+  exceptId?: string
+) {
   const count = await prisma.financialReminder.count({
     where: {
       userId,
-      financialItemId,
+      financialItemId: target.financialItemId || undefined,
+      savingId: target.savingId || undefined,
       id: exceptId ? { not: exceptId } : undefined
     }
   });
@@ -58,6 +77,7 @@ export async function listFinancialReminders(userId: string, filters: ListFinanc
     where: {
       userId,
       financialItemId: filters.financialItemId,
+      savingId: filters.savingId,
       status: filters.status,
       remindAt: filters.dueOnly
         ? { lte: now }
@@ -67,7 +87,8 @@ export async function listFinancialReminders(userId: string, filters: ListFinanc
           }
     },
     include: {
-      financialItem: true
+      financialItem: true,
+      saving: true
     },
     orderBy: [{ remindAt: 'asc' }, { createdAt: 'asc' }]
   });
@@ -76,13 +97,18 @@ export async function listFinancialReminders(userId: string, filters: ListFinanc
 }
 
 export async function createFinancialReminder(userId: string, input: FinancialReminderInput) {
-  await assertFinancialItemOwner(userId, input.financialItemId);
-  await assertReminderLimit(userId, input.financialItemId);
+  if (input.financialItemId) await assertFinancialItemOwner(userId, input.financialItemId);
+  if (input.savingId) await assertSavingOwner(userId, input.savingId);
+  await assertReminderLimit(userId, {
+    financialItemId: input.financialItemId,
+    savingId: input.savingId
+  });
 
   const reminder = await prisma.financialReminder.create({
     data: {
       userId,
-      financialItemId: input.financialItemId,
+      financialItemId: input.financialItemId ?? null,
+      savingId: input.savingId ?? null,
       title: input.title.trim(),
       message: input.message?.trim() || null,
       remindAt: input.remindAt,
@@ -102,15 +128,20 @@ export async function updateFinancialReminder(userId: string, id: string, input:
   }
 
   const nextFinancialItemId = input.financialItemId ?? existing.financialItemId;
+  const nextSavingId = input.savingId ?? existing.savingId;
   if (input.financialItemId && input.financialItemId !== existing.financialItemId) {
     await assertFinancialItemOwner(userId, input.financialItemId);
   }
-  await assertReminderLimit(userId, nextFinancialItemId, id);
+  if (input.savingId && input.savingId !== existing.savingId) {
+    await assertSavingOwner(userId, input.savingId);
+  }
+  await assertReminderLimit(userId, { financialItemId: nextFinancialItemId, savingId: nextSavingId }, id);
 
   const reminder = await prisma.financialReminder.update({
     where: { id },
     data: {
       financialItemId: input.financialItemId,
+      savingId: input.savingId,
       title: input.title?.trim(),
       message: input.message === undefined ? undefined : input.message?.trim() || null,
       remindAt: input.remindAt,
