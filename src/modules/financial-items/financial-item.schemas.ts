@@ -5,6 +5,20 @@ export const recurrenceTypeSchema = z.enum(['NONE', 'DAILY', 'WEEKLY', 'MONTHLY'
 export const paymentStatusSchema = z.enum(['PENDENTE', 'PAGO', 'ATRASADO', 'CANCELADO']);
 export const valueUpdateScopeSchema = z.enum(['ONLY_THIS_PERIOD', 'FROM_THIS_PERIOD_FORWARD', 'ALL_YEAR']);
 export const periodTypeSchema = z.enum(['DAY', 'WEEK', 'MONTH', 'YEAR']);
+
+function normalizeMoneyValue(value: unknown) {
+  if (typeof value !== 'string') return value;
+  const normalized = value
+    .replace(/\s/g, '')
+    .replace(/[R$]/g, '')
+    .replace(/\./g, '')
+    .replace(',', '.');
+  return Number(normalized);
+}
+
+const positiveMoneySchema = z.preprocess(normalizeMoneyValue, z.coerce.number().positive());
+const nonnegativeMoneySchema = z.preprocess(normalizeMoneyValue, z.coerce.number().nonnegative());
+
 export const categoryActionSchema = z.object({
   type: financialEntryTypeSchema,
   category: z.string().min(1),
@@ -18,7 +32,7 @@ const financialItemBaseSchema = z.object({
   title: z.string().min(2).optional(),
   name: z.string().min(2).optional(),
   description: z.string().optional().nullable(),
-  amount: z.coerce.number().positive(),
+  amount: positiveMoneySchema,
   type: financialEntryTypeSchema,
   category: z.string().min(2).optional(),
   month: z.coerce.number().int().min(1).max(12).optional(),
@@ -47,7 +61,7 @@ export const paymentStatusUpdateSchema = z.object({
 });
 
 export const updateFinancialItemValueSchema = z.object({
-  amount: z.coerce.number().positive(),
+  amount: nonnegativeMoneySchema,
   date: z.coerce.date(),
   scope: valueUpdateScopeSchema,
   periodType: periodTypeSchema,
@@ -68,11 +82,19 @@ export const listFinancialItemsSchema = z.object({
   endDate: z.coerce.date().optional()
 });
 
+export const salaryCandidatesSchema = z.object({
+  month: z.coerce.number().int().min(1).max(12).optional(),
+  year: z.coerce.number().int().min(2000).max(2100),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(50).default(12)
+});
+
 export const paymentSummarySchema = periodFilterSchema;
 
 export type CreateFinancialItemInput = z.infer<typeof createFinancialItemSchema>;
 export type UpdateFinancialItemInput = z.infer<typeof updateFinancialItemSchema>;
 export type ListFinancialItemsInput = z.infer<typeof listFinancialItemsSchema>;
+export type SalaryCandidatesInput = z.infer<typeof salaryCandidatesSchema>;
 export type UpdateFinancialItemValueInput = z.infer<typeof updateFinancialItemValueSchema>;
 export type PaymentStatusUpdateInput = z.infer<typeof paymentStatusUpdateSchema>;
 export type PaymentSummaryInput = z.infer<typeof paymentSummarySchema>;

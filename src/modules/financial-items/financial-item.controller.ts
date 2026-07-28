@@ -7,6 +7,7 @@ import {
   paymentStatusUpdateSchema,
   paymentSummarySchema,
   renameCategorySchema,
+  salaryCandidatesSchema,
   updateFinancialItemValueSchema,
   updateFinancialItemSchema
 } from './financial-item.schemas.js';
@@ -17,6 +18,7 @@ import {
   getDashboard,
   getPaymentSummary,
   listFinancialItems,
+  listSalaryCandidates,
   renameFinancialCategory,
   updateFinancialItem,
   updateFinancialItemPaymentStatus,
@@ -29,6 +31,12 @@ export async function listFinancialItemsController(request: FastifyRequest, repl
   const filters = listFinancialItemsSchema.parse(request.query);
   const items = await listFinancialItems(request.user.sub, filters);
   return reply.send({ items });
+}
+
+export async function salaryCandidatesController(request: FastifyRequest, reply: FastifyReply) {
+  const filters = salaryCandidatesSchema.parse(request.query);
+  const result = await listSalaryCandidates(request.user.sub, filters);
+  return reply.send(result);
 }
 
 export async function createFinancialItemController(request: FastifyRequest, reply: FastifyReply) {
