@@ -25,9 +25,18 @@ import { env } from './shared/env.js';
 export function buildApp() {
   const app = fastify({ logger: true });
   const allowedOrigins = env.WEB_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean);
+  const localDevOriginPattern = /^http:\/\/(localhost|127\.0\.0\.1|\d{1,3}(?:\.\d{1,3}){3}):(5173|5174|5175|19006|8081)$/;
 
   app.register(cors, {
-    origin: [...allowedOrigins, 'http://localhost:19006', 'http://localhost:8081'],
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin) || localDevOriginPattern.test(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(null, false);
+    },
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Authorization', 'Content-Type'],
     credentials: true
   });
 

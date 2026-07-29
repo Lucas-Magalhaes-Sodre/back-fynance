@@ -89,6 +89,7 @@ export async function dispatchDuePushReminders(now = new Date()) {
     },
     include: {
       financialItem: true,
+      saving: true,
       user: {
         include: {
           pushTokens: {
@@ -108,10 +109,15 @@ export async function dispatchDuePushReminders(now = new Date()) {
         to: pushToken.token,
         sound: 'default' as const,
         title: reminder.title,
-        body: reminder.message || `Lembrete financeiro: ${reminder.financialItem.title}`,
+        body:
+          reminder.message ||
+          `Lembrete financeiro: ${
+            reminder.financialItem?.title ?? reminder.saving?.title ?? reminder.title
+          }`,
         data: {
           reminderId: reminder.id,
-          financialItemId: reminder.financialItemId
+          ...(reminder.financialItemId ? { financialItemId: reminder.financialItemId } : {}),
+          ...(reminder.savingId ? { savingId: reminder.savingId } : {})
         }
       }))
   );

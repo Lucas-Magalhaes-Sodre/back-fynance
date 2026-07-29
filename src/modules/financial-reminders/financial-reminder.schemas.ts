@@ -7,20 +7,26 @@ const queryBooleanSchema = z.preprocess((value) => {
   return value;
 }, z.boolean());
 
-export const financialReminderSchema = z.object({
-  financialItemId: z.string().uuid(),
+const financialReminderBaseSchema = z.object({
+  financialItemId: z.string().uuid().optional(),
+  savingId: z.string().uuid().optional(),
   title: z.string().min(2),
   message: z.string().optional().nullable(),
   remindAt: z.coerce.date(),
   offsetDays: z.coerce.number().int().min(0).max(365).optional().nullable()
 });
 
-export const updateFinancialReminderSchema = financialReminderSchema.partial().extend({
+export const financialReminderSchema = financialReminderBaseSchema.refine((data) => data.financialItemId || data.savingId, {
+  message: 'Informe um lancamento ou uma economia para criar o lembrete'
+});
+
+export const updateFinancialReminderSchema = financialReminderBaseSchema.partial().extend({
   status: reminderStatusSchema.optional()
 });
 
 export const listFinancialRemindersSchema = z.object({
   financialItemId: z.string().uuid().optional(),
+  savingId: z.string().uuid().optional(),
   status: reminderStatusSchema.optional(),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),

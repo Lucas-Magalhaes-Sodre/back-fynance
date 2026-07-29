@@ -8,6 +8,7 @@ import {
   listFinancialItemsController,
   paymentSummaryController,
   renameFinancialCategoryController,
+  salaryCandidatesController,
   updateFinancialItemController,
   updateFinancialItemPaymentStatusController,
   updateFinancialItemValueController
@@ -21,6 +22,7 @@ export async function financialItemRoutes(app: FastifyInstance) {
   app.patch('/category', renameFinancialCategoryController);
   app.delete('/category', deleteFinancialCategoryController);
   app.get('/payment-summary', paymentSummaryController);
+  app.get('/salary-candidates', salaryCandidatesController);
   app.patch('/:id/payment-status', updateFinancialItemPaymentStatusController);
   app.patch('/:id/value', updateFinancialItemValueController);
   app.put('/:id', updateFinancialItemController);

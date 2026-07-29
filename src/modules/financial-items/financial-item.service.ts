@@ -7,9 +7,21 @@ import type {
   PaymentSummaryInput,
   PaymentStatusUpdateInput,
   RenameCategoryInput,
+  SalaryCandidatesInput,
   UpdateFinancialItemValueInput,
   UpdateFinancialItemInput
 } from './financial-item.schemas.js';
+
+const salarySearchTerms = [
+  'salario',
+  'salário',
+  'ordenado',
+  'folha',
+  'pagamento',
+  'adiantamento',
+  'pro labore',
+  'pró labore'
+];
 
 function toNumber(value: Prisma.Decimal | number) {
   return Number(value);
@@ -56,6 +68,24 @@ function typeFilter(type: 'INCOME' | 'EXPENSE') {
     : [FinancialItemType.EXPENSE];
 }
 
+function salaryCandidateWhere(userId: string, filters: SalaryCandidatesInput): Prisma.FinancialItemWhereInput {
+  return {
+    userId,
+    type: FinancialItemType.INCOME,
+    year: filters.year,
+    month: filters.month,
+    OR: [
+      { isFixed: true },
+      { recurrenceType: RecurrenceType.MONTHLY },
+      ...salarySearchTerms.flatMap((term) => [
+        { name: { contains: term, mode: Prisma.QueryMode.insensitive } },
+        { title: { contains: term, mode: Prisma.QueryMode.insensitive } },
+        { category: { contains: term, mode: Prisma.QueryMode.insensitive } }
+      ])
+    ]
+  };
+}
+
 function normalizeStatus(type: FinancialItemType, dueDate?: Date | null, paymentDate?: Date | null, status?: PaymentStatus) {
   if (status === PaymentStatus.CANCELADO) return PaymentStatus.CANCELADO;
   if (!isExpenseType(type)) return PaymentStatus.PAGO;
@@ -77,6 +107,38 @@ function currentStatus(item: {
   status: PaymentStatus;
 }) {
   return normalizeStatus(item.type, item.dueDate, item.paymentDate, item.status);
+}
+
+function valueUpdateWhere(
+  userId: string,
+  existing: Awaited<ReturnType<typeof prisma.financialItem.findFirst>>,
+  scope: UpdateFinancialItemValueInput['scope']
+): Prisma.FinancialItemWhereInput {
+  if (!existing || scope === 'ONLY_THIS_PERIOD') return { id: existing?.id, userId };
+
+  const where: Prisma.FinancialItemWhereInput = existing.recurrenceGroupId
+    ? {
+        userId,
+        recurrenceGroupId: existing.recurrenceGroupId,
+        year: existing.year
+      }
+    : {
+        userId,
+        type: existing.type,
+        category: existing.category,
+        name: existing.name,
+        year: existing.year,
+        OR: [
+          { isFixed: true },
+          { recurrenceType: { not: RecurrenceType.NONE } }
+        ]
+      };
+
+  if (scope === 'FROM_THIS_PERIOD_FORWARD') {
+    where.month = { gte: existing.month };
+  }
+
+  return where;
 }
 
 function inferCategory(input: CreateFinancialItemInput | UpdateFinancialItemInput) {
@@ -130,6 +192,30 @@ export async function listFinancialItems(userId: string, filters: ListFinancialI
   if (!filters.status || filters.status !== PaymentStatus.ATRASADO) return serializedItems;
 
   return serializedItems.filter((item) => item.status === PaymentStatus.ATRASADO);
+}
+
+export async function listSalaryCandidates(userId: string, filters: SalaryCandidatesInput) {
+  const where = salaryCandidateWhere(userId, filters);
+  const skip = (filters.page - 1) * filters.limit;
+  const [items, total] = await Promise.all([
+    prisma.financialItem.findMany({
+      where,
+      orderBy: [{ month: 'asc' }, { date: 'asc' }, { createdAt: 'asc' }],
+      skip,
+      take: filters.limit
+    }),
+    prisma.financialItem.count({ where })
+  ]);
+
+  return {
+    items: items.map(serializeItem),
+    pagination: {
+      page: filters.page,
+      limit: filters.limit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / filters.limit))
+    }
+  };
 }
 
 export async function createFinancialItem(userId: string, input: CreateFinancialItemInput) {
@@ -331,19 +417,7 @@ export async function updateFinancialItemValue(userId: string, id: string, input
     description: input.description ?? existing.description
   };
 
-  let where: Prisma.FinancialItemWhereInput = { id, userId };
-
-  if (input.scope !== 'ONLY_THIS_PERIOD' && existing.recurrenceGroupId) {
-    where = {
-      userId,
-      recurrenceGroupId: existing.recurrenceGroupId,
-      year: existing.year
-    };
-
-    if (input.scope === 'FROM_THIS_PERIOD_FORWARD') {
-      where.month = { gte: existing.month };
-    }
-  }
+  const where = valueUpdateWhere(userId, existing, input.scope);
 
   await prisma.financialItem.updateMany({ where, data: updateData });
 
