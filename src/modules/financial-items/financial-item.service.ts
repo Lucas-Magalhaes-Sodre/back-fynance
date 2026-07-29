@@ -109,6 +109,23 @@ function currentStatus(item: {
   return normalizeStatus(item.type, item.dueDate, item.paymentDate, item.status);
 }
 
+function daysInMonth(year: number, month: number) {
+  return new Date(year, month, 0).getDate();
+}
+
+function dateForMonthlyOccurrence(year: number, month: number, day: number) {
+  const safeDay = Math.min(day, daysInMonth(year, month));
+  return new Date(year, month - 1, safeDay);
+}
+
+function targetMonthsForValueUpdate(startMonth: number, scope: UpdateFinancialItemValueInput['scope']) {
+  if (scope === 'ONLY_THIS_PERIOD') return [startMonth];
+  if (scope === 'FROM_THIS_PERIOD_FORWARD') {
+    return Array.from({ length: 13 - startMonth }, (_, index) => startMonth + index);
+  }
+  return Array.from({ length: 12 }, (_, index) => index + 1);
+}
+
 function valueUpdateWhere(
   userId: string,
   existing: Awaited<ReturnType<typeof prisma.financialItem.findFirst>>,
@@ -417,12 +434,99 @@ export async function updateFinancialItemValue(userId: string, id: string, input
     description: input.description ?? existing.description
   };
 
-  const where = valueUpdateWhere(userId, existing, input.scope);
+  if (input.scope === 'ONLY_THIS_PERIOD') {
+    await prisma.financialItem.update({ where: { id: existing.id }, data: updateData });
+  } else {
+    const months = targetMonthsForValueUpdate(existing.month, input.scope);
+    const selectedDate = input.date;
+    const occurrenceDay = existing.dueDay ?? existing.dueDate?.getDate() ?? selectedDate.getDate();
+    const recurrenceGroupId =
+      existing.recurrenceGroupId ?? `${userId}:${existing.type}:${existing.category}:${existing.name}:${existing.year}`;
 
-  await prisma.financialItem.updateMany({ where, data: updateData });
+    await prisma.$transaction(async (tx) => {
+      for (const month of months) {
+        const monthItems = await tx.financialItem.findMany({
+          where: {
+            userId,
+            type: existing.type,
+            category: existing.category,
+            name: existing.name,
+            year: existing.year,
+            month,
+            OR: [
+              { recurrenceGroupId },
+              { recurrenceGroupId: existing.recurrenceGroupId },
+              { recurrenceGroupId: null }
+            ]
+          },
+          orderBy: [{ date: 'asc' }, { createdAt: 'asc' }]
+        });
+        const [primary, ...duplicates] = monthItems;
+        if (primary) {
+          await tx.financialItem.update({
+            where: { id: primary.id },
+            data: {
+              ...updateData,
+              isFixed: primary.isFixed || existing.isFixed,
+              recurrenceType: primary.recurrenceType !== RecurrenceType.NONE
+                ? primary.recurrenceType
+                : existing.recurrenceType,
+              recurrenceGroupId
+            }
+          });
+          if (duplicates.length) {
+            await tx.financialItem.deleteMany({
+              where: { id: { in: duplicates.map((item) => item.id) } }
+            });
+          }
+          continue;
+        }
+
+        if (input.amount <= 0) continue;
+
+        const occurrenceDate = dateForMonthlyOccurrence(existing.year, month, occurrenceDay);
+        const dueDate = isExpenseType(existing.type) ? occurrenceDate : null;
+        await tx.financialItem.create({
+          data: {
+            userId,
+            title: existing.title,
+            name: existing.name,
+            description: input.description ?? existing.description,
+            amount: input.amount,
+            type: existing.type,
+            category: existing.category,
+            dueDate,
+            paymentDate: null,
+            status: normalizeStatus(existing.type, dueDate, null, existing.status),
+            dueDay: existing.dueDay ?? (isExpenseType(existing.type) ? occurrenceDay : null),
+            isFixed: existing.isFixed || existing.recurrenceType !== RecurrenceType.NONE || Boolean(existing.recurrenceGroupId),
+            recurrenceType: existing.recurrenceType !== RecurrenceType.NONE
+              ? existing.recurrenceType
+              : RecurrenceType.MONTHLY,
+            recurrenceGroupId,
+            date: occurrenceDate,
+            month,
+            year: existing.year
+          }
+        });
+      }
+    });
+  }
+
+  const touchedWhere: Prisma.FinancialItemWhereInput = input.scope === 'ONLY_THIS_PERIOD'
+    ? { id: existing.id, userId }
+    : {
+        userId,
+        type: existing.type,
+        category: existing.category,
+        name: existing.name,
+        year: existing.year,
+        month: { in: targetMonthsForValueUpdate(existing.month, input.scope) },
+        recurrenceGroupId: existing.recurrenceGroupId ?? `${userId}:${existing.type}:${existing.category}:${existing.name}:${existing.year}`
+      };
 
   const touchedItems = await prisma.financialItem.findMany({
-    where,
+    where: touchedWhere,
     orderBy: [{ date: 'asc' }, { createdAt: 'asc' }]
   });
 
