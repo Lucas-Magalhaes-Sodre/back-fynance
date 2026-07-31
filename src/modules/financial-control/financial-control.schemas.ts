@@ -27,7 +27,16 @@ export const yearQuerySchema = z.object({
   year: yearSchema
 });
 
+export const financialTablePreferenceSchema = z.object({
+  groupsSeparated: z.coerce.boolean().optional(),
+  tableScale: z.coerce.number().int().min(-2).max(2).optional(),
+  categoryColumnWidth: z.coerce.number().int().min(132).max(420).optional(),
+  categoryGroupsExpanded: z.coerce.boolean().optional(),
+  subitemsExpanded: z.coerce.boolean().optional()
+});
+
 export type DayQuery = z.infer<typeof dayQuerySchema>;
 export type WeekQuery = z.infer<typeof weekQuerySchema>;
 export type MonthQuery = z.infer<typeof monthQuerySchema>;
 export type YearQuery = z.infer<typeof yearQuerySchema>;
+export type FinancialTablePreferenceInput = z.infer<typeof financialTablePreferenceSchema>;

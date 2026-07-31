@@ -2,7 +2,9 @@ import type { FastifyInstance } from 'fastify';
 import { authenticate } from '../users/authenticate.js';
 import {
   dayControlController,
+  financialTablePreferenceController,
   monthControlController,
+  updateFinancialTablePreferenceController,
   weekControlController,
   yearControlByParamController,
   yearControlController,
@@ -16,6 +18,8 @@ export async function financialControlRoutes(app: FastifyInstance) {
   app.get('/week', weekControlController);
   app.get('/month', monthControlController);
   app.get('/year', yearControlController);
+  app.get('/table-preferences', financialTablePreferenceController);
+  app.put('/table-preferences', updateFinancialTablePreferenceController);
   app.get('/:year', yearControlByParamController);
   app.get('/summary/:year', yearSummaryController);
 }

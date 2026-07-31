@@ -119,12 +119,28 @@ model User {
   creditCardPurchases CreditCardPurchase[]
   reminders     FinancialReminder[]
   pushTokens    PushToken[]
+  financialTablePreference FinancialTablePreference?
   subscriptionEvents SubscriptionEvent[]
   subscriptionTermsAcceptances SubscriptionTermsAcceptance[]
   adminAuditLogs AdminAuditLog[]
   financialCategoriesInitialized Boolean @default(false)
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
+}
+
+model FinancialTablePreference {
+  id                  String   @id @default(uuid())
+  userId              String   @unique
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  groupsSeparated     Boolean  @default(false)
+  tableScale          Int      @default(0)
+  categoryColumnWidth Int      @default(220)
+  categoryGroupsExpanded Boolean @default(false)
+  subitemsExpanded    Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([userId])
 }
 
 model SubscriptionTermsAcceptance {

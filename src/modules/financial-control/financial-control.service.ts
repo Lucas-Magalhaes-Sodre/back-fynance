@@ -1,9 +1,18 @@
 import { FinancialItemType, PaymentStatus, Prisma } from '@prisma/client';
 import { prisma } from '../../shared/prisma.js';
 import { MONTHS } from './financial-control.constants.js';
+import type { FinancialTablePreferenceInput } from './financial-control.schemas.js';
 
 type Item = Awaited<ReturnType<typeof prisma.financialItem.findMany>>[number];
 type SavingItem = Awaited<ReturnType<typeof prisma.savings.findMany>>[number];
+
+const defaultTablePreference = {
+  groupsSeparated: false,
+  tableScale: 0,
+  categoryColumnWidth: 220,
+  categoryGroupsExpanded: false,
+  subitemsExpanded: false
+};
 
 function toNumber(value: Prisma.Decimal | number) {
   return Number(value);
@@ -34,6 +43,49 @@ function serializeItem(item: Item) {
 
 function serializeSaving(saving: SavingItem) {
   return { ...saving, amount: toNumber(saving.amount) };
+}
+
+function serializeTablePreference(preference: FinancialTablePreferenceInput | null) {
+  return {
+    ...defaultTablePreference,
+    ...preference
+  };
+}
+
+export async function getFinancialTablePreference(userId: string) {
+  const preference = await prisma.financialTablePreference.findUnique({
+    where: { userId },
+    select: {
+      groupsSeparated: true,
+      tableScale: true,
+      categoryColumnWidth: true,
+      categoryGroupsExpanded: true,
+      subitemsExpanded: true
+    }
+  });
+
+  return serializeTablePreference(preference);
+}
+
+export async function updateFinancialTablePreference(userId: string, input: FinancialTablePreferenceInput) {
+  const preference = await prisma.financialTablePreference.upsert({
+    where: { userId },
+    create: {
+      userId,
+      ...defaultTablePreference,
+      ...input
+    },
+    update: input,
+    select: {
+      groupsSeparated: true,
+      tableScale: true,
+      categoryColumnWidth: true,
+      categoryGroupsExpanded: true,
+      subitemsExpanded: true
+    }
+  });
+
+  return serializeTablePreference(preference);
 }
 
 function periodSavings(savings: SavingItem[]) {
