@@ -1,0 +1,1 @@
+ALTER TABLE "Savings" ADD COLUMN "isInitialBalance" BOOLEAN NOT NULL DEFAULT false;

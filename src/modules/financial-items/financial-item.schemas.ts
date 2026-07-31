@@ -22,7 +22,7 @@ const nonnegativeMoneySchema = z.preprocess(normalizeMoneyValue, z.coerce.number
 export const categoryActionSchema = z.object({
   type: financialEntryTypeSchema,
   category: z.string().min(1),
-  year: z.coerce.number().int().min(2000).max(2100).optional()
+  year: z.coerce.number().int().min(1900).max(3000).optional()
 });
 export const renameCategorySchema = categoryActionSchema.extend({
   newCategory: z.string().min(1)
@@ -36,7 +36,7 @@ const financialItemBaseSchema = z.object({
   type: financialEntryTypeSchema,
   category: z.string().min(2).optional(),
   month: z.coerce.number().int().min(1).max(12).optional(),
-  year: z.coerce.number().int().min(2000).max(2100).optional(),
+  year: z.coerce.number().int().min(1900).max(3000).optional(),
   dueDay: z.coerce.number().int().min(1).max(31).optional().nullable(),
   isFixed: z.coerce.boolean().optional(),
   recurrenceType: recurrenceTypeSchema.optional(),
@@ -49,7 +49,7 @@ const financialItemBaseSchema = z.object({
 
 const periodFilterSchema = z.object({
   month: z.coerce.number().int().min(1).max(12).optional(),
-  year: z.coerce.number().int().min(2000).max(2100).optional(),
+  year: z.coerce.number().int().min(1900).max(3000).optional(),
   startDate: z.coerce.date().optional(),
   endDate: z.coerce.date().optional()
 });
@@ -65,6 +65,7 @@ export const updateFinancialItemValueSchema = z.object({
   date: z.coerce.date(),
   scope: valueUpdateScopeSchema,
   periodType: periodTypeSchema,
+  endMonth: z.coerce.number().int().min(1).max(12).optional(),
   description: z.string().optional().nullable()
 });
 
@@ -84,9 +85,47 @@ export const listFinancialItemsSchema = z.object({
 
 export const salaryCandidatesSchema = z.object({
   month: z.coerce.number().int().min(1).max(12).optional(),
-  year: z.coerce.number().int().min(2000).max(2100),
+  year: z.coerce.number().int().min(1900).max(3000),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(50).default(12)
+});
+
+export const copyFinancialCategorySchema = z.object({
+  scope: z.enum(['CATEGORY', 'ALL_INCOME', 'ALL_EXPENSE', 'ALL_INVESTMENT', 'ALL_TABLE', 'SELECTED_SUBITEMS']).default('CATEGORY'),
+  type: z.enum(['INCOME', 'EXPENSE', 'INVESTMENT']).optional(),
+  category: z.string().min(1).optional(),
+  subItems: z.array(z.object({
+    type: z.enum(['INCOME', 'EXPENSE', 'INVESTMENT']),
+    category: z.string().min(1),
+    name: z.string().min(1)
+  })).max(200).optional(),
+  sourceYear: z.coerce.number().int().min(1900).max(3000),
+  targetYears: z.array(z.coerce.number().int().min(1900).max(3000)).min(1).max(5),
+  overwrite: z.coerce.boolean().default(true)
+}).refine((data) => data.scope !== 'CATEGORY' || (data.type && data.category), {
+  message: 'Informe tipo e categoria para copiar uma categoria',
+  path: ['category']
+}).refine((data) => data.scope !== 'SELECTED_SUBITEMS' || Boolean(data.subItems?.length), {
+  message: 'Selecione ao menos um subitem para copiar',
+  path: ['subItems']
+});
+
+export const bulkDeleteFinancialScopeSchema = z.object({
+  scope: z.enum(['CATEGORY', 'ALL_INCOME', 'ALL_EXPENSE', 'ALL_INVESTMENT', 'ALL_TABLE', 'SELECTED_SUBITEMS']),
+  type: z.enum(['INCOME', 'EXPENSE', 'INVESTMENT']).optional(),
+  category: z.string().min(1).optional(),
+  subItems: z.array(z.object({
+    type: z.enum(['INCOME', 'EXPENSE', 'INVESTMENT']),
+    category: z.string().min(1),
+    name: z.string().min(1)
+  })).max(200).optional(),
+  year: z.coerce.number().int().min(1900).max(3000)
+}).refine((data) => data.scope !== 'CATEGORY' || (data.type && data.category), {
+  message: 'Informe tipo e categoria para excluir uma categoria',
+  path: ['category']
+}).refine((data) => data.scope !== 'SELECTED_SUBITEMS' || Boolean(data.subItems?.length), {
+  message: 'Selecione ao menos um subitem para excluir',
+  path: ['subItems']
 });
 
 export const paymentSummarySchema = periodFilterSchema;
@@ -95,6 +134,8 @@ export type CreateFinancialItemInput = z.infer<typeof createFinancialItemSchema>
 export type UpdateFinancialItemInput = z.infer<typeof updateFinancialItemSchema>;
 export type ListFinancialItemsInput = z.infer<typeof listFinancialItemsSchema>;
 export type SalaryCandidatesInput = z.infer<typeof salaryCandidatesSchema>;
+export type CopyFinancialCategoryInput = z.infer<typeof copyFinancialCategorySchema>;
+export type BulkDeleteFinancialScopeInput = z.infer<typeof bulkDeleteFinancialScopeSchema>;
 export type UpdateFinancialItemValueInput = z.infer<typeof updateFinancialItemValueSchema>;
 export type PaymentStatusUpdateInput = z.infer<typeof paymentStatusUpdateSchema>;
 export type PaymentSummaryInput = z.infer<typeof paymentSummarySchema>;

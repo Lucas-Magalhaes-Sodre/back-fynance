@@ -4,6 +4,7 @@ import type {
   CreateSavingInput,
   ListSavingsInput,
   SavingsExtractInput,
+  SavingsDeleteGroupInput,
   SavingsProjectionInput,
   SavingsSummaryInput,
   SavingsTransferInput,
@@ -85,6 +86,7 @@ function serializeSaving(saving: {
   isFixed: boolean;
   recurrenceType: RecurrenceType;
   recurrenceGroupId: string | null;
+  isInitialBalance: boolean;
   goalId: string | null;
   hasYield: boolean;
   yieldRateMonthly: Prisma.Decimal | null;
@@ -126,6 +128,7 @@ function writeData(input: CreateSavingInput) {
     isFixed,
     recurrenceType,
     recurrenceGroupId: input.recurrenceGroupId ?? (isFixed || recurrenceType !== RecurrenceType.NONE ? `${category}:${input.title}` : null),
+    isInitialBalance: input.isInitialBalance ?? false,
     goalId: input.goalId,
     hasYield: input.hasYield ?? false,
     yieldRateMonthly: input.hasYield ? input.yieldRateMonthly ?? 0 : null
@@ -356,6 +359,16 @@ export async function deleteSaving(userId: string, id: string) {
   await prisma.savings.delete({ where: { id } });
 }
 
+export async function deleteSavingsGroup(userId: string, input: SavingsDeleteGroupInput) {
+  const where: Prisma.SavingsWhereInput = {
+    userId,
+    category: input.category,
+    title: input.title
+  };
+  const result = await prisma.savings.deleteMany({ where });
+  return { deletedCount: result.count };
+}
+
 export async function getSavingsOverview(userId: string) {
   const today = endOfToday();
   const currentMonth = today.getMonth() + 1;
@@ -374,7 +387,7 @@ export async function getSavingsOverview(userId: string) {
       select: { amount: true, type: true }
     }),
     prisma.savings.aggregate({
-      where: { userId, month: currentMonth, year: currentYear, amount: { gt: 0 } },
+      where: { userId, month: currentMonth, year: currentYear, amount: { gt: 0 }, isInitialBalance: false },
       _sum: { amount: true }
     })
   ]);
@@ -558,11 +571,11 @@ export async function getSavingsSummary(userId: string, filters: SavingsSummaryI
   const today = new Date();
   const [monthSavings, monthSavedOut, accumulatedSavings, currentSavings, futureSavings, monthItems] = await Promise.all([
     prisma.savings.aggregate({
-      where: { userId, month: filters.month, year: filters.year },
+      where: { userId, month: filters.month, year: filters.year, isInitialBalance: false },
       _sum: { amount: true }
     }),
     prisma.savings.aggregate({
-      where: { userId, month: filters.month, year: filters.year, amount: { gt: 0 } },
+      where: { userId, month: filters.month, year: filters.year, amount: { gt: 0 }, isInitialBalance: false },
       _sum: { amount: true }
     }),
     prisma.savings.aggregate({

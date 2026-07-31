@@ -1,7 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { authenticate } from '../users/authenticate.js';
 import {
+  bulkDeleteFinancialScopeController,
   createFinancialItemController,
+  copyFinancialCategoryController,
   dashboardController,
   deleteFinancialCategoryController,
   deleteFinancialItemController,
@@ -19,6 +21,8 @@ export async function financialItemRoutes(app: FastifyInstance) {
 
   app.get('/', listFinancialItemsController);
   app.post('/', createFinancialItemController);
+  app.post('/copy-category', copyFinancialCategoryController);
+  app.delete('/bulk-scope', bulkDeleteFinancialScopeController);
   app.patch('/category', renameFinancialCategoryController);
   app.delete('/category', deleteFinancialCategoryController);
   app.get('/payment-summary', paymentSummaryController);

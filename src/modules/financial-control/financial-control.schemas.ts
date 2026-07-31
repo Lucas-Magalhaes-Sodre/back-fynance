@@ -1,7 +1,9 @@
 import { z } from 'zod';
 
+const yearSchema = z.coerce.number().int().min(1900).max(3000);
+
 export const yearParamsSchema = z.object({
-  year: z.coerce.number().int().min(2000).max(2100)
+  year: yearSchema
 });
 
 export const dayQuerySchema = z.object({
@@ -18,11 +20,11 @@ export const weekQuerySchema = z.object({
 
 export const monthQuerySchema = z.object({
   month: z.coerce.number().int().min(1).max(12),
-  year: z.coerce.number().int().min(2000).max(2100)
+  year: yearSchema
 });
 
 export const yearQuerySchema = z.object({
-  year: z.coerce.number().int().min(2000).max(2100)
+  year: yearSchema
 });
 
 export type DayQuery = z.infer<typeof dayQuerySchema>;

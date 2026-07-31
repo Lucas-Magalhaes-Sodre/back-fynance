@@ -1,7 +1,9 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
+  bulkDeleteFinancialScopeSchema,
   createFinancialItemSchema,
+  copyFinancialCategorySchema,
   categoryActionSchema,
   listFinancialItemsSchema,
   paymentStatusUpdateSchema,
@@ -12,9 +14,11 @@ import {
   updateFinancialItemSchema
 } from './financial-item.schemas.js';
 import {
+  copyFinancialCategory,
   createFinancialItem,
   deleteFinancialCategory,
   deleteFinancialItem,
+  deleteFinancialScope,
   getDashboard,
   getPaymentSummary,
   listFinancialItems,
@@ -43,6 +47,18 @@ export async function createFinancialItemController(request: FastifyRequest, rep
   const data = createFinancialItemSchema.parse(request.body);
   const item = await createFinancialItem(request.user.sub, data);
   return reply.status(201).send({ item });
+}
+
+export async function copyFinancialCategoryController(request: FastifyRequest, reply: FastifyReply) {
+  const data = copyFinancialCategorySchema.parse(request.body);
+  const result = await copyFinancialCategory(request.user.sub, data);
+  return reply.send(result);
+}
+
+export async function bulkDeleteFinancialScopeController(request: FastifyRequest, reply: FastifyReply) {
+  const data = bulkDeleteFinancialScopeSchema.parse(request.body);
+  const result = await deleteFinancialScope(request.user.sub, data);
+  return reply.send(result);
 }
 
 export async function updateFinancialItemController(request: FastifyRequest, reply: FastifyReply) {

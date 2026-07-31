@@ -36,6 +36,10 @@ function serializeSaving(saving: SavingItem) {
   return { ...saving, amount: toNumber(saving.amount) };
 }
 
+function periodSavings(savings: SavingItem[]) {
+  return savings.filter((saving) => !saving.isInitialBalance);
+}
+
 function isIncome(type: FinancialItemType) {
   return type === FinancialItemType.INCOME;
 }
@@ -136,7 +140,7 @@ function categoryRows(items: Item[], type: 'INCOME' | 'EXPENSE') {
 }
 
 export async function getYearControl(userId: string, year: number) {
-  const [items, savings] = await Promise.all([
+  const [items, allSavings] = await Promise.all([
     prisma.financialItem.findMany({
       where: { userId, year },
       orderBy: [{ date: 'asc' }, { createdAt: 'asc' }]
@@ -147,6 +151,7 @@ export async function getYearControl(userId: string, year: number) {
     })
   ]);
 
+  const savings = periodSavings(allSavings);
   const monthlySummary = MONTHS.map((month) => {
     const monthItems = items.filter((item) => item.month === month.value);
     const monthSavings = savings.filter((saving) => saving.month === month.value);
@@ -186,7 +191,7 @@ export async function getYearControl(userId: string, year: number) {
 }
 
 export async function getMonthControl(userId: string, month: number, year: number) {
-  const [items, savings] = await Promise.all([
+  const [items, allSavings] = await Promise.all([
     prisma.financialItem.findMany({
       where: { userId, month, year },
       orderBy: [{ date: 'asc' }, { createdAt: 'asc' }]
@@ -197,6 +202,7 @@ export async function getMonthControl(userId: string, month: number, year: numbe
     })
   ]);
 
+  const savings = periodSavings(allSavings);
   return { month, year, ...splitItems(items), savings: savings.map(serializeSaving), totals: summarize(items, savings) };
 }
 
@@ -205,7 +211,7 @@ export async function getDayControl(userId: string, date: Date) {
   const month = date.getUTCMonth() + 1;
   const year = date.getUTCFullYear();
 
-  const [items, savings] = await Promise.all([
+  const [items, allSavings] = await Promise.all([
     prisma.financialItem.findMany({
       where: { userId, month, year },
       orderBy: [{ date: 'asc' }, { createdAt: 'asc' }]
@@ -217,6 +223,7 @@ export async function getDayControl(userId: string, date: Date) {
   ]);
 
   const dayItems = items.filter((item) => dateKey(item.date) === targetKey);
+  const savings = periodSavings(allSavings);
   const daySavings = savings.filter((saving) => dateKey(saving.date) === targetKey);
 
   return { date: targetKey, ...splitItems(dayItems), savings: daySavings.map(serializeSaving), totals: summarize(dayItems, daySavings) };
@@ -228,7 +235,7 @@ export async function getWeekControl(userId: string, startDate: Date, endDate: D
   const start = new Date(`${startKey}T00:00:00.000Z`);
   const end = new Date(`${endKey}T23:59:59.999Z`);
 
-  const [items, savings] = await Promise.all([
+  const [items, allSavings] = await Promise.all([
     prisma.financialItem.findMany({
       where: { userId, date: { gte: start, lte: end } },
       orderBy: [{ date: 'asc' }, { createdAt: 'asc' }]
@@ -239,6 +246,7 @@ export async function getWeekControl(userId: string, startDate: Date, endDate: D
     })
   ]);
 
+  const savings = periodSavings(allSavings);
   const days = Array.from({ length: 7 }, (_, index) => {
     const day = new Date(`${startKey}T00:00:00.000Z`);
     day.setUTCDate(day.getUTCDate() + index);

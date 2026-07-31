@@ -4,6 +4,7 @@ import {
   createSavingSchema,
   listSavingsSchema,
   savingsExtractSchema,
+  savingsDeleteGroupSchema,
   savingsProjectionSchema,
   savingsSummarySchema,
   savingsTransferSchema,
@@ -12,6 +13,7 @@ import {
 import {
   createSaving,
   deleteSaving,
+  deleteSavingsGroup,
   getSavingsExtract,
   getSavingsOverview,
   getSavingsProjection,
@@ -46,6 +48,12 @@ export async function deleteSavingController(request: FastifyRequest, reply: Fas
   const { id } = idParamsSchema.parse(request.params);
   await deleteSaving(request.user.sub, id);
   return reply.status(204).send();
+}
+
+export async function deleteSavingsGroupController(request: FastifyRequest, reply: FastifyReply) {
+  const data = savingsDeleteGroupSchema.parse(request.query);
+  const result = await deleteSavingsGroup(request.user.sub, data);
+  return reply.send(result);
 }
 
 export async function savingsSummaryController(request: FastifyRequest, reply: FastifyReply) {

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { authenticate } from '../users/authenticate.js';
 import {
   createSavingController,
+  deleteSavingsGroupController,
   deleteSavingController,
   savingsExtractController,
   savingsOverviewController,
@@ -22,6 +23,7 @@ export async function savingsRoutes(app: FastifyInstance) {
   app.get('/projection', savingsProjectionController);
   app.get('/summary', savingsSummaryController);
   app.post('/transfer', savingsTransferController);
+  app.delete('/group', deleteSavingsGroupController);
   app.put('/:id', updateSavingController);
   app.delete('/:id', deleteSavingController);
 }

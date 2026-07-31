@@ -290,6 +290,7 @@ model Savings {
   isFixed     Boolean  @default(false)
   recurrenceType RecurrenceType @default(NONE)
   recurrenceGroupId String?
+  isInitialBalance Boolean @default(false)
   goalId      String?
   hasYield    Boolean  @default(false)
   yieldRateMonthly Decimal? @db.Decimal(7, 4)
