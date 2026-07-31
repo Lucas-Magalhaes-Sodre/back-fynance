@@ -3,6 +3,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { IncomingHttpHeaders } from 'node:http';
 import { env } from '../../shared/env.js';
 import { CANCELLATION_VERSION, PRIVACY_VERSION, TERMS_VERSION } from '../../shared/legal.js';
+import { normalizePlanIncludedItems, normalizePlanProductKeys, normalizePlanProductLabels } from '../../shared/plan-products.js';
 import { prisma } from '../../shared/prisma.js';
 import { accessInfo } from './access.service.js';
 import type { CheckoutInput, CouponValidationInput } from './billing.schemas.js';
@@ -13,9 +14,13 @@ function publicPlan(plan: {
   id: string;
   name: string;
   description: string | null;
+  originalPrice: unknown | null;
   price: unknown;
   currency: string;
   durationMonths: number;
+  productKeys: string[];
+  productLabels: unknown;
+  includedItems: string[];
   active: boolean;
   sortOrder: number;
   createdAt: Date;
@@ -23,7 +28,11 @@ function publicPlan(plan: {
 }) {
   return {
     ...plan,
-    price: Number(plan.price)
+    originalPrice: plan.originalPrice ? Number(plan.originalPrice) : null,
+    price: Number(plan.price),
+    productKeys: normalizePlanProductKeys(plan.productKeys),
+    productLabels: normalizePlanProductLabels(plan.productLabels),
+    includedItems: normalizePlanIncludedItems(plan.includedItems)
   };
 }
 
@@ -122,6 +131,9 @@ export async function getBillingStatus(userId: string) {
       planNameSnapshot: true,
       planPriceSnapshot: true,
       planDurationMonthsSnapshot: true,
+      planProductKeysSnapshot: true,
+      planProductLabelsSnapshot: true,
+      planIncludedItemsSnapshot: true,
       couponCodeSnapshot: true,
       couponDiscountSnapshot: true,
       subscriptionCurrentPeriodEnd: true,
@@ -239,6 +251,9 @@ async function recordSubscriptionTermsAcceptance(input: {
       planPrice: input.originalPrice,
       planCurrency: input.plan.currency,
       planDurationMonths: input.plan.durationMonths,
+      planProductKeys: normalizePlanProductKeys(input.plan.productKeys),
+      planProductLabels: normalizePlanProductLabels(input.plan.productLabels),
+      planIncludedItems: normalizePlanIncludedItems(input.plan.includedItems),
       couponCode: input.couponCode ?? null,
       discountAmount: input.discount.discountAmount,
       finalPrice: input.discount.finalPrice,
@@ -335,6 +350,9 @@ export async function createCheckout(
       planNameSnapshot: plan.name,
       planPriceSnapshot: discount.finalPrice,
       planDurationMonthsSnapshot: plan.durationMonths,
+      planProductKeysSnapshot: normalizePlanProductKeys(plan.productKeys),
+      planProductLabelsSnapshot: normalizePlanProductLabels(plan.productLabels),
+      planIncludedItemsSnapshot: normalizePlanIncludedItems(plan.includedItems),
       couponCodeSnapshot: coupon?.code,
       couponDiscountSnapshot: coupon ? discount.discountAmount : null
     }
@@ -442,6 +460,9 @@ export async function processMercadoPagoWebhook(payload: unknown, query: Record<
       planNameSnapshot: plan?.name,
       planPriceSnapshot: finalPrice,
       planDurationMonthsSnapshot: plan?.durationMonths,
+      planProductKeysSnapshot: normalizePlanProductKeys(plan?.productKeys),
+      planProductLabelsSnapshot: normalizePlanProductLabels(plan?.productLabels),
+      planIncludedItemsSnapshot: normalizePlanIncludedItems(plan?.includedItems),
       couponCodeSnapshot: coupon?.code,
       couponDiscountSnapshot: discountAmount,
       lastPaymentAt: approvedPayment ? new Date() : undefined,

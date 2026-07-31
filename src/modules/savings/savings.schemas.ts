@@ -10,16 +10,17 @@ const savingsBaseSchema = z.object({
   amount: z.coerce.number().positive(),
   date: z.coerce.date(),
   month: z.coerce.number().int().min(1).max(12).optional(),
-  year: z.coerce.number().int().min(2000).max(2100).optional(),
+  year: z.coerce.number().int().min(1900).max(3000).optional(),
   isFixed: z.coerce.boolean().optional(),
   recurrenceType: recurrenceTypeSchema.optional(),
   recurrenceGroupId: z.string().optional().nullable(),
+  isInitialBalance: z.coerce.boolean().optional(),
   recurrenceGeneration: z.object({
     mode: z.enum(['ALL_YEAR', 'FROM_SELECTED_MONTH', 'CUSTOM']),
     startMonth: z.coerce.number().int().min(1).max(12),
-    startYear: z.coerce.number().int().min(2000).max(2100),
+    startYear: z.coerce.number().int().min(1900).max(3000),
     endMonth: z.coerce.number().int().min(1).max(12),
-    endYear: z.coerce.number().int().min(2000).max(2100)
+    endYear: z.coerce.number().int().min(1900).max(3000)
   }).optional(),
   goalId: z.string().uuid().optional().nullable(),
   hasYield: z.coerce.boolean().optional(),
@@ -33,14 +34,19 @@ export const listSavingsSchema = z.object({
   startDate: z.coerce.date().optional(),
   endDate: z.coerce.date().optional(),
   month: z.coerce.number().int().min(1).max(12).optional(),
-  year: z.coerce.number().int().min(2000).max(2100).optional(),
+  year: z.coerce.number().int().min(1900).max(3000).optional(),
   category: z.string().optional(),
   goalId: z.string().uuid().optional()
 });
 
+export const savingsDeleteGroupSchema = z.object({
+  category: z.string().min(1),
+  title: z.string().min(1).optional()
+});
+
 export const savingsSummarySchema = z.object({
   month: z.coerce.number().int().min(1).max(12),
-  year: z.coerce.number().int().min(2000).max(2100)
+  year: z.coerce.number().int().min(1900).max(3000)
 });
 
 export const savingsExtractSchema = z.object({
@@ -67,7 +73,7 @@ export const savingsTransferSchema = z.object({
   amount: z.coerce.number().positive(),
   date: z.coerce.date(),
   month: z.coerce.number().int().min(1).max(12).optional(),
-  year: z.coerce.number().int().min(2000).max(2100).optional(),
+  year: z.coerce.number().int().min(1900).max(3000).optional(),
   goalId: z.string().uuid().optional().nullable(),
   hasYield: z.coerce.boolean().optional(),
   yieldRateMonthly: z.coerce.number().min(0).max(100).optional().nullable()
@@ -76,6 +82,7 @@ export const savingsTransferSchema = z.object({
 export type CreateSavingInput = z.infer<typeof createSavingSchema>;
 export type UpdateSavingInput = z.infer<typeof updateSavingSchema>;
 export type ListSavingsInput = z.infer<typeof listSavingsSchema>;
+export type SavingsDeleteGroupInput = z.infer<typeof savingsDeleteGroupSchema>;
 export type SavingsSummaryInput = z.infer<typeof savingsSummarySchema>;
 export type SavingsExtractInput = z.infer<typeof savingsExtractSchema>;
 export type SavingsProjectionInput = z.infer<typeof savingsProjectionSchema>;

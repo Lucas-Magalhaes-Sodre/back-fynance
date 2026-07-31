@@ -25,12 +25,12 @@ export const deleteCreditCardPurchaseSchema = z.object({
   deleteAllInstallments: z.coerce.boolean().optional(),
   installmentNumber: z.coerce.number().int().min(1).optional(),
   month: z.coerce.number().int().min(1).max(12).optional(),
-  year: z.coerce.number().int().min(2000).max(2100).optional()
+  year: z.coerce.number().int().min(1900).max(3000).optional()
 }).optional().default({});
 
 export const listCreditCardsSchema = z.object({
   month: z.coerce.number().int().min(1).max(12).optional(),
-  year: z.coerce.number().int().min(2000).max(2100).optional(),
+  year: z.coerce.number().int().min(1900).max(3000).optional(),
   cardId: z.string().uuid().optional(),
   cardName: z.string().optional()
 });

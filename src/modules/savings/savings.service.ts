@@ -1,9 +1,14 @@
 import { FinancialItemType, Prisma, RecurrenceType } from '@prisma/client';
 import { prisma } from '../../shared/prisma.js';
+import {
+  SAVINGS_REDEMPTION_INCOME_CATEGORY,
+  SAVINGS_REDEMPTION_INCOME_ITEM
+} from '../../shared/system-categories.js';
 import type {
   CreateSavingInput,
   ListSavingsInput,
   SavingsExtractInput,
+  SavingsDeleteGroupInput,
   SavingsProjectionInput,
   SavingsSummaryInput,
   SavingsTransferInput,
@@ -85,6 +90,7 @@ function serializeSaving(saving: {
   isFixed: boolean;
   recurrenceType: RecurrenceType;
   recurrenceGroupId: string | null;
+  isInitialBalance: boolean;
   goalId: string | null;
   hasYield: boolean;
   yieldRateMonthly: Prisma.Decimal | null;
@@ -126,6 +132,7 @@ function writeData(input: CreateSavingInput) {
     isFixed,
     recurrenceType,
     recurrenceGroupId: input.recurrenceGroupId ?? (isFixed || recurrenceType !== RecurrenceType.NONE ? `${category}:${input.title}` : null),
+    isInitialBalance: input.isInitialBalance ?? false,
     goalId: input.goalId,
     hasYield: input.hasYield ?? false,
     yieldRateMonthly: input.hasYield ? input.yieldRateMonthly ?? 0 : null
@@ -285,15 +292,31 @@ export async function transferSavings(userId: string, input: SavingsTransferInpu
 
     let income = null;
     if (input.direction === 'WITHDRAW_TO_BALANCE') {
+      await tx.financialCategory.upsert({
+        where: {
+          userId_type_name: {
+            userId,
+            type: FinancialItemType.INCOME,
+            name: SAVINGS_REDEMPTION_INCOME_CATEGORY
+          }
+        },
+        create: {
+          userId,
+          type: FinancialItemType.INCOME,
+          name: SAVINGS_REDEMPTION_INCOME_CATEGORY,
+          color: '#0F766E'
+        },
+        update: {}
+      });
       income = await tx.financialItem.create({
         data: {
           userId,
-          title: input.title,
-          name: input.title,
+          title: SAVINGS_REDEMPTION_INCOME_ITEM,
+          name: SAVINGS_REDEMPTION_INCOME_ITEM,
           description,
           amount: input.amount,
           type: FinancialItemType.INCOME,
-          category: 'Economias',
+          category: SAVINGS_REDEMPTION_INCOME_CATEGORY,
           date,
           paymentDate: date,
           status: 'PAGO',
@@ -356,6 +379,16 @@ export async function deleteSaving(userId: string, id: string) {
   await prisma.savings.delete({ where: { id } });
 }
 
+export async function deleteSavingsGroup(userId: string, input: SavingsDeleteGroupInput) {
+  const where: Prisma.SavingsWhereInput = {
+    userId,
+    category: input.category,
+    title: input.title
+  };
+  const result = await prisma.savings.deleteMany({ where });
+  return { deletedCount: result.count };
+}
+
 export async function getSavingsOverview(userId: string) {
   const today = endOfToday();
   const currentMonth = today.getMonth() + 1;
@@ -374,7 +407,7 @@ export async function getSavingsOverview(userId: string) {
       select: { amount: true, type: true }
     }),
     prisma.savings.aggregate({
-      where: { userId, month: currentMonth, year: currentYear, amount: { gt: 0 } },
+      where: { userId, month: currentMonth, year: currentYear, amount: { gt: 0 }, isInitialBalance: false },
       _sum: { amount: true }
     })
   ]);
@@ -558,11 +591,11 @@ export async function getSavingsSummary(userId: string, filters: SavingsSummaryI
   const today = new Date();
   const [monthSavings, monthSavedOut, accumulatedSavings, currentSavings, futureSavings, monthItems] = await Promise.all([
     prisma.savings.aggregate({
-      where: { userId, month: filters.month, year: filters.year },
+      where: { userId, month: filters.month, year: filters.year, isInitialBalance: false },
       _sum: { amount: true }
     }),
     prisma.savings.aggregate({
-      where: { userId, month: filters.month, year: filters.year, amount: { gt: 0 } },
+      where: { userId, month: filters.month, year: filters.year, amount: { gt: 0 }, isInitialBalance: false },
       _sum: { amount: true }
     }),
     prisma.savings.aggregate({

@@ -1,5 +1,9 @@
 import { FinancialItemType, Prisma } from '@prisma/client';
 import { prisma } from '../../shared/prisma.js';
+import {
+  SAVINGS_REDEMPTION_INCOME_CATEGORY,
+  SAVINGS_TRANSFER_INCOME_CATEGORY
+} from '../../shared/system-categories.js';
 import type {
   FinancialCategoryInput,
   ListFinancialCategoriesInput,
@@ -7,7 +11,8 @@ import type {
 } from './financial-category.schemas.js';
 
 const defaultCategories = [
-  { name: 'Economias', type: FinancialItemType.INCOME, color: '#16A34A' },
+  { name: SAVINGS_TRANSFER_INCOME_CATEGORY, type: FinancialItemType.INCOME, color: '#16A34A' },
+  { name: SAVINGS_REDEMPTION_INCOME_CATEGORY, type: FinancialItemType.INCOME, color: '#0F766E' },
   { name: 'Salário', type: FinancialItemType.INCOME, color: '#2563EB' },
   { name: 'Freelance', type: FinancialItemType.INCOME, color: '#0F766E' },
   { name: 'Rendimentos', type: FinancialItemType.INCOME, color: '#7C3AED' },
@@ -50,7 +55,11 @@ function normalizeCategoryName(name: string) {
 }
 
 function isProtectedSavingsIncomeCategory(category: { name: string; type: FinancialItemType }) {
-  return category.type === FinancialItemType.INCOME && normalizeCategoryName(category.name) === 'economias';
+  return category.type === FinancialItemType.INCOME && normalizeCategoryName(category.name) === normalizeCategoryName(SAVINGS_TRANSFER_INCOME_CATEGORY);
+}
+
+function isProtectedSavingsRedemptionIncomeCategory(category: { name: string; type: FinancialItemType }) {
+  return category.type === FinancialItemType.INCOME && normalizeCategoryName(category.name) === normalizeCategoryName(SAVINGS_REDEMPTION_INCOME_CATEGORY);
 }
 
 function isProtectedCreditCardExpenseCategory(category: { name: string; type: FinancialItemType }) {
@@ -63,7 +72,7 @@ function isProtectedBirthdayExpenseCategory(category: { name: string; type: Fina
 }
 
 function isProtectedSystemCategory(category: { name: string; type: FinancialItemType }) {
-  return isProtectedSavingsIncomeCategory(category) || isProtectedCreditCardExpenseCategory(category) || isProtectedBirthdayExpenseCategory(category);
+  return isProtectedSavingsIncomeCategory(category) || isProtectedSavingsRedemptionIncomeCategory(category) || isProtectedCreditCardExpenseCategory(category) || isProtectedBirthdayExpenseCategory(category);
 }
 
 async function assertUniqueCategoryName(userId: string, type: FinancialItemType, name: string, exceptId?: string) {
@@ -126,12 +135,12 @@ async function ensureDefaultCategories(userId: string) {
   ]);
 }
 
-async function ensureSavingsIncomeCategory(userId: string) {
+async function ensureIncomeCategory(userId: string, name: string, color: string) {
   const existing = await prisma.financialCategory.findFirst({
     where: {
       userId,
       type: FinancialItemType.INCOME,
-      name: 'Economias'
+      name
     }
   });
   if (existing) return;
@@ -139,11 +148,19 @@ async function ensureSavingsIncomeCategory(userId: string) {
   await prisma.financialCategory.create({
     data: {
       userId,
-      name: 'Economias',
+      name,
       type: FinancialItemType.INCOME,
-      color: '#16A34A'
+      color
     }
   });
+}
+
+async function ensureSavingsIncomeCategory(userId: string) {
+  await ensureIncomeCategory(userId, SAVINGS_TRANSFER_INCOME_CATEGORY, '#16A34A');
+}
+
+async function ensureSavingsRedemptionIncomeCategory(userId: string) {
+  await ensureIncomeCategory(userId, SAVINGS_REDEMPTION_INCOME_CATEGORY, '#0F766E');
 }
 
 async function ensureCreditCardExpenseCategory(userId: string) {
@@ -208,6 +225,7 @@ async function ensureBirthdayExpenseCategory(userId: string) {
 export async function listFinancialCategories(userId: string, filters: ListFinancialCategoriesInput) {
   await ensureDefaultCategories(userId);
   await ensureSavingsIncomeCategory(userId);
+  await ensureSavingsRedemptionIncomeCategory(userId);
   await ensureCreditCardExpenseCategory(userId);
   await ensureBirthdayExpenseCategory(userId);
   const categories = await prisma.financialCategory.findMany({
@@ -224,6 +242,7 @@ export async function listFinancialCategories(userId: string, filters: ListFinan
 export async function createFinancialCategory(userId: string, input: FinancialCategoryInput) {
   await ensureDefaultCategories(userId);
   await ensureSavingsIncomeCategory(userId);
+  await ensureSavingsRedemptionIncomeCategory(userId);
   await ensureCreditCardExpenseCategory(userId);
   await ensureBirthdayExpenseCategory(userId);
   const type = normalizeType(input.type);
@@ -253,6 +272,7 @@ export async function createFinancialCategory(userId: string, input: FinancialCa
 export async function updateFinancialCategory(userId: string, id: string, input: UpdateFinancialCategoryInput) {
   await ensureDefaultCategories(userId);
   await ensureSavingsIncomeCategory(userId);
+  await ensureSavingsRedemptionIncomeCategory(userId);
   await ensureCreditCardExpenseCategory(userId);
   await ensureBirthdayExpenseCategory(userId);
   const existing = await prisma.financialCategory.findFirst({ where: { id, userId } });
@@ -268,6 +288,12 @@ export async function updateFinancialCategory(userId: string, id: string, input:
 
   if (isProtectedSavingsIncomeCategory(existing) && changesProtectedIdentity) {
     const error = new Error('A categoria Economias e obrigatoria e nao pode mudar de tipo') as Error & { statusCode: number };
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (isProtectedSavingsRedemptionIncomeCategory(existing) && changesProtectedIdentity) {
+    const error = new Error('A categoria Resgate de economia e obrigatoria e nao pode mudar de tipo') as Error & { statusCode: number };
     error.statusCode = 400;
     throw error;
   }
@@ -323,6 +349,7 @@ export async function updateFinancialCategory(userId: string, id: string, input:
 export async function deleteFinancialCategory(userId: string, id: string) {
   await ensureDefaultCategories(userId);
   await ensureSavingsIncomeCategory(userId);
+  await ensureSavingsRedemptionIncomeCategory(userId);
   await ensureCreditCardExpenseCategory(userId);
   await ensureBirthdayExpenseCategory(userId);
   const existing = await prisma.financialCategory.findFirst({ where: { id, userId } });

@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import {
   dayQuerySchema,
+  financialTablePreferenceSchema,
   monthQuerySchema,
   weekQuerySchema,
   yearParamsSchema,
@@ -8,10 +9,12 @@ import {
 } from './financial-control.schemas.js';
 import {
   getDayControl,
+  getFinancialTablePreference,
   getMonthControl,
   getWeekControl,
   getYearControl,
-  getYearSummary
+  getYearSummary,
+  updateFinancialTablePreference
 } from './financial-control.service.js';
 
 export async function dayControlController(request: FastifyRequest, reply: FastifyReply) {
@@ -44,3 +47,13 @@ export async function yearSummaryController(request: FastifyRequest, reply: Fast
   return reply.send(await getYearSummary(request.user.sub, year));
 }
 
+export async function financialTablePreferenceController(request: FastifyRequest, reply: FastifyReply) {
+  const preferences = await getFinancialTablePreference(request.user.sub);
+  return reply.send({ preferences });
+}
+
+export async function updateFinancialTablePreferenceController(request: FastifyRequest, reply: FastifyReply) {
+  const data = financialTablePreferenceSchema.parse(request.body);
+  const preferences = await updateFinancialTablePreference(request.user.sub, data);
+  return reply.send({ preferences });
+}

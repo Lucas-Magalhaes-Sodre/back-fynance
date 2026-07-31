@@ -1,5 +1,6 @@
 import { prisma } from '../../shared/prisma.js';
 import { env } from '../../shared/env.js';
+import { normalizePlanIncludedItems, normalizePlanProductKeys, normalizePlanProductLabels } from '../../shared/plan-products.js';
 import { accessInfo } from '../billing/access.service.js';
 import type { AdminUpdateSubscriptionInput, AnonymizeUserInput, AppSettingsInput, BillingCouponInput, BillingPlanInput, BillingPlanOrderInput, GrantTrialInput } from './admin.schemas.js';
 
@@ -20,6 +21,9 @@ const adminUserSelect = {
   planNameSnapshot: true,
   planPriceSnapshot: true,
   planDurationMonthsSnapshot: true,
+  planProductKeysSnapshot: true,
+  planProductLabelsSnapshot: true,
+  planIncludedItemsSnapshot: true,
   couponCodeSnapshot: true,
   couponDiscountSnapshot: true,
   subscriptionCurrentPeriodEnd: true,
@@ -41,15 +45,26 @@ function serializePlan(plan: {
   id: string;
   name: string;
   description: string | null;
+  originalPrice: unknown | null;
   price: unknown;
   currency: string;
   durationMonths: number;
+  productKeys: string[];
+  productLabels: unknown;
+  includedItems: string[];
   active: boolean;
   sortOrder: number;
   createdAt: Date;
   updatedAt: Date;
 }) {
-  return { ...plan, price: Number(plan.price) };
+  return {
+    ...plan,
+    originalPrice: plan.originalPrice ? Number(plan.originalPrice) : null,
+    price: Number(plan.price),
+    productKeys: normalizePlanProductKeys(plan.productKeys),
+    productLabels: normalizePlanProductLabels(plan.productLabels),
+    includedItems: normalizePlanIncludedItems(plan.includedItems)
+  };
 }
 
 function serializeCoupon(coupon: {
@@ -89,6 +104,9 @@ function adminLifetimeAccessData() {
     planNameSnapshot: 'Vitalício',
     planPriceSnapshot: 0,
     planDurationMonthsSnapshot: null,
+    planProductKeysSnapshot: [],
+    planProductLabelsSnapshot: {},
+    planIncludedItemsSnapshot: [],
     couponCodeSnapshot: null,
     couponDiscountSnapshot: null,
     subscriptionCurrentPeriodEnd: null
@@ -354,6 +372,9 @@ export async function anonymizeAdminUser(userId: string, input: AnonymizeUserInp
       planNameSnapshot: null,
       planPriceSnapshot: null,
       planDurationMonthsSnapshot: null,
+      planProductKeysSnapshot: [],
+      planProductLabelsSnapshot: {},
+      planIncludedItemsSnapshot: [],
       couponCodeSnapshot: null,
       couponDiscountSnapshot: null
     },
@@ -380,13 +401,20 @@ export async function listAdminBillingPlans() {
 }
 
 export async function createAdminBillingPlan(input: BillingPlanInput) {
+  const productKeys = normalizePlanProductKeys(input.productKeys);
+  const productLabels = normalizePlanProductLabels(input.productLabels);
+  const includedItems = normalizePlanIncludedItems(input.includedItems);
   const plan = await prisma.billingPlan.create({
     data: {
       name: input.name,
       description: input.description,
+      originalPrice: input.originalPrice,
       price: input.price,
       currency: input.currency.toUpperCase(),
       durationMonths: input.durationMonths,
+      productKeys,
+      productLabels,
+      includedItems,
       active: input.active,
       sortOrder: input.sortOrder
     }
@@ -395,14 +423,21 @@ export async function createAdminBillingPlan(input: BillingPlanInput) {
 }
 
 export async function updateAdminBillingPlan(planId: string, input: BillingPlanInput) {
+  const productKeys = normalizePlanProductKeys(input.productKeys);
+  const productLabels = normalizePlanProductLabels(input.productLabels);
+  const includedItems = normalizePlanIncludedItems(input.includedItems);
   const plan = await prisma.billingPlan.update({
     where: { id: planId },
     data: {
       name: input.name,
       description: input.description,
+      originalPrice: input.originalPrice,
       price: input.price,
       currency: input.currency.toUpperCase(),
       durationMonths: input.durationMonths,
+      productKeys,
+      productLabels,
+      includedItems,
       active: input.active,
       sortOrder: input.sortOrder
     }

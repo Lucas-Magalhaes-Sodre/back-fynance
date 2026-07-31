@@ -1,8 +1,11 @@
 import { FinancialItemType, PaymentStatus, Prisma, RecurrenceType } from '@prisma/client';
 import { prisma } from '../../shared/prisma.js';
+import { SAVINGS_REDEMPTION_INCOME_CATEGORY } from '../../shared/system-categories.js';
 import type {
+  BulkDeleteFinancialScopeInput,
   CreateFinancialItemInput,
   CategoryActionInput,
+  CopyFinancialCategoryInput,
   ListFinancialItemsInput,
   PaymentSummaryInput,
   PaymentStatusUpdateInput,
@@ -56,6 +59,37 @@ function normalizeType(type: CreateFinancialItemInput['type'] | UpdateFinancialI
   if (type === FinancialItemType.INCOME) return FinancialItemType.INCOME;
   if (type === FinancialItemType.EXPENSE) return FinancialItemType.EXPENSE;
   return undefined;
+}
+
+function normalizeCategoryName(name: string) {
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('pt-BR')
+    .trim();
+}
+
+function assertNotManualSavingsRedemption(input: {
+  type?: CreateFinancialItemInput['type'] | UpdateFinancialItemInput['type'] | FinancialItemType;
+  category?: string | null;
+}) {
+  const rawType = String(input.type ?? '');
+  const type =
+    rawType === FinancialItemType.INCOME
+      ? FinancialItemType.INCOME
+      : rawType === FinancialItemType.EXPENSE
+        ? FinancialItemType.EXPENSE
+        : undefined;
+  const category = input.category;
+  if (
+    type === FinancialItemType.INCOME &&
+    category &&
+    normalizeCategoryName(category) === normalizeCategoryName(SAVINGS_REDEMPTION_INCOME_CATEGORY)
+  ) {
+    const error = new Error('A categoria Resgate de economia so pode ser usada ao resgatar uma economia') as Error & { statusCode: number };
+    error.statusCode = 400;
+    throw error;
+  }
 }
 
 function isExpenseType(type: FinancialItemType | undefined) {
@@ -124,6 +158,16 @@ function targetMonthsForValueUpdate(startMonth: number, scope: UpdateFinancialIt
     return Array.from({ length: 13 - startMonth }, (_, index) => startMonth + index);
   }
   return Array.from({ length: 12 }, (_, index) => index + 1);
+}
+
+function boundedTargetMonths(
+  startMonth: number,
+  scope: UpdateFinancialItemValueInput['scope'],
+  endMonth?: number
+) {
+  const months = targetMonthsForValueUpdate(startMonth, scope);
+  if (!endMonth) return months;
+  return months.filter((month) => month >= Math.min(startMonth, endMonth) && month <= Math.max(startMonth, endMonth));
 }
 
 function valueUpdateWhere(
@@ -211,6 +255,219 @@ export async function listFinancialItems(userId: string, filters: ListFinancialI
   return serializedItems.filter((item) => item.status === PaymentStatus.ATRASADO);
 }
 
+export async function copyFinancialCategory(userId: string, input: CopyFinancialCategoryInput) {
+  const targetYears = Array.from(new Set(input.targetYears)).filter((targetYear) => targetYear !== input.sourceYear);
+  if (!targetYears.length) return { copiedCount: 0 };
+
+  const selectedItems = input.subItems ?? [];
+  const selectedFinancialItems = selectedItems.filter((item) => item.type !== 'INVESTMENT');
+  const selectedSavings = selectedItems.filter((item) => item.type === 'INVESTMENT');
+  const itemTypes = input.scope === 'ALL_INCOME'
+    ? [FinancialItemType.INCOME]
+    : input.scope === 'ALL_EXPENSE'
+      ? [FinancialItemType.EXPENSE]
+      : input.scope === 'ALL_TABLE'
+        ? [FinancialItemType.INCOME, FinancialItemType.EXPENSE]
+        : input.scope === 'CATEGORY' && input.type !== 'INVESTMENT'
+          ? [input.type === 'INCOME' ? FinancialItemType.INCOME : FinancialItemType.EXPENSE]
+          : undefined;
+  const itemWhere: Prisma.FinancialItemWhereInput = {
+    userId,
+    year: input.sourceYear,
+    type: itemTypes ? { in: itemTypes } : undefined,
+    category: input.scope === 'CATEGORY' && input.type !== 'INVESTMENT' ? input.category : undefined,
+    OR: input.scope === 'SELECTED_SUBITEMS'
+      ? selectedFinancialItems
+          .map((item) => ({
+            type: item.type === 'INCOME' ? FinancialItemType.INCOME : FinancialItemType.EXPENSE,
+            category: item.category,
+            name: item.name
+          }))
+      : undefined
+  };
+  const savingWhere: Prisma.SavingsWhereInput = {
+    userId,
+    year: input.sourceYear,
+    isInitialBalance: false,
+    category: input.scope === 'CATEGORY' && input.type === 'INVESTMENT' ? input.category : undefined,
+    OR: input.scope === 'SELECTED_SUBITEMS'
+      ? selectedSavings
+          .map((item) => ({
+            category: item.category,
+            title: item.name
+          }))
+      : undefined
+  };
+  const shouldCopyItems =
+    input.scope === 'ALL_INCOME' ||
+    input.scope === 'ALL_EXPENSE' ||
+    input.scope === 'ALL_TABLE' ||
+    (input.scope === 'CATEGORY' && input.type !== 'INVESTMENT') ||
+    (input.scope === 'SELECTED_SUBITEMS' && selectedFinancialItems.length > 0);
+  const shouldCopySavings =
+    input.scope === 'ALL_INVESTMENT' ||
+    input.scope === 'ALL_TABLE' ||
+    (input.scope === 'CATEGORY' && input.type === 'INVESTMENT') ||
+    (input.scope === 'SELECTED_SUBITEMS' && selectedSavings.length > 0);
+
+  const [sourceItems, sourceSavings] = await Promise.all([
+    shouldCopyItems
+      ? prisma.financialItem.findMany({
+          where: itemWhere,
+          orderBy: [{ date: 'asc' }, { createdAt: 'asc' }]
+        })
+      : Promise.resolve([]),
+    shouldCopySavings
+      ? prisma.savings.findMany({
+          where: savingWhere,
+          orderBy: [{ date: 'asc' }, { createdAt: 'asc' }]
+        })
+      : Promise.resolve([])
+  ]);
+
+  let copiedCount = 0;
+  await prisma.$transaction(async (tx) => {
+    for (const targetYear of targetYears) {
+      if (input.overwrite) {
+        if (shouldCopyItems) {
+          await tx.financialItem.deleteMany({
+            where: { ...itemWhere, year: targetYear }
+          });
+        }
+        if (shouldCopySavings) {
+          await tx.savings.deleteMany({
+            where: { ...savingWhere, year: targetYear }
+          });
+        }
+      }
+      for (const item of sourceItems) {
+        const occurrenceDate = dateForMonthlyOccurrence(targetYear, item.month, item.date.getDate());
+        const dueDate = item.dueDate ? dateForMonthlyOccurrence(targetYear, item.month, item.dueDate.getDate()) : null;
+        await tx.financialItem.create({
+          data: {
+            userId,
+            title: item.title,
+            name: item.name,
+            description: item.description,
+            amount: item.amount,
+            type: item.type,
+            category: item.category,
+            dueDate,
+            paymentDate: item.paymentDate ? dateForMonthlyOccurrence(targetYear, item.month, item.paymentDate.getDate()) : null,
+            status: item.status,
+            dueDay: item.dueDay,
+            isFixed: item.isFixed,
+            recurrenceType: item.recurrenceType,
+            recurrenceGroupId: item.recurrenceGroupId ? `${item.recurrenceGroupId}:COPY:${targetYear}` : null,
+            date: occurrenceDate,
+            month: item.month,
+            year: targetYear
+          }
+        });
+        copiedCount += 1;
+      }
+      for (const saving of sourceSavings) {
+        const occurrenceDate = dateForMonthlyOccurrence(targetYear, saving.month, saving.date.getDate());
+        await tx.savings.create({
+          data: {
+            userId,
+            title: saving.title,
+            category: saving.category,
+            color: saving.color,
+            description: saving.description,
+            amount: saving.amount,
+            date: occurrenceDate,
+            month: saving.month,
+            year: targetYear,
+            isFixed: saving.isFixed,
+            recurrenceType: saving.recurrenceType,
+            recurrenceGroupId: saving.recurrenceGroupId
+              ? `${saving.recurrenceGroupId}:COPY:${targetYear}`
+              : null,
+            isInitialBalance: false,
+            goalId: saving.goalId,
+            hasYield: saving.hasYield,
+            yieldRateMonthly: saving.yieldRateMonthly
+          }
+        });
+        copiedCount += 1;
+      }
+    }
+  });
+
+  return { copiedCount };
+}
+
+export async function deleteFinancialScope(userId: string, input: BulkDeleteFinancialScopeInput) {
+  const selectedItems = input.subItems ?? [];
+  const selectedFinancialItems = selectedItems.filter((item) => item.type !== 'INVESTMENT');
+  const selectedSavings = selectedItems.filter((item) => item.type === 'INVESTMENT');
+  const itemTypes = input.scope === 'ALL_INCOME'
+    ? [FinancialItemType.INCOME]
+    : input.scope === 'ALL_EXPENSE'
+      ? [FinancialItemType.EXPENSE]
+      : input.scope === 'ALL_TABLE'
+        ? [FinancialItemType.INCOME, FinancialItemType.EXPENSE]
+        : input.scope === 'CATEGORY' && input.type !== 'INVESTMENT'
+          ? [input.type === 'INCOME' ? FinancialItemType.INCOME : FinancialItemType.EXPENSE]
+          : undefined;
+  const itemWhere: Prisma.FinancialItemWhereInput = {
+    userId,
+    year: input.year,
+    type: itemTypes ? { in: itemTypes } : undefined,
+    category: input.scope === 'CATEGORY' && input.type !== 'INVESTMENT' ? input.category : undefined,
+    OR: input.scope === 'SELECTED_SUBITEMS'
+      ? selectedFinancialItems.map((item) => ({
+          type: item.type === 'INCOME' ? FinancialItemType.INCOME : FinancialItemType.EXPENSE,
+          category: item.category,
+          name: item.name
+        }))
+      : undefined
+  };
+  const savingWhere: Prisma.SavingsWhereInput = {
+    userId,
+    year: input.year,
+    isInitialBalance: false,
+    category: input.scope === 'CATEGORY' && input.type === 'INVESTMENT' ? input.category : undefined,
+    OR: input.scope === 'SELECTED_SUBITEMS'
+      ? selectedSavings.map((item) => ({
+          category: item.category,
+          title: item.name
+        }))
+      : undefined
+  };
+  const shouldDeleteItems =
+    input.scope === 'ALL_INCOME' ||
+    input.scope === 'ALL_EXPENSE' ||
+    input.scope === 'ALL_TABLE' ||
+    (input.scope === 'CATEGORY' && input.type !== 'INVESTMENT') ||
+    (input.scope === 'SELECTED_SUBITEMS' && selectedFinancialItems.length > 0);
+  const shouldDeleteSavings =
+    input.scope === 'ALL_INVESTMENT' ||
+    input.scope === 'ALL_TABLE' ||
+    (input.scope === 'CATEGORY' && input.type === 'INVESTMENT') ||
+    (input.scope === 'SELECTED_SUBITEMS' && selectedSavings.length > 0);
+
+  const result = await prisma.$transaction(async (tx) => {
+    const [itemsResult, savingsResult] = await Promise.all([
+      shouldDeleteItems
+        ? tx.financialItem.deleteMany({ where: itemWhere })
+        : Promise.resolve({ count: 0 }),
+      shouldDeleteSavings
+        ? tx.savings.deleteMany({ where: savingWhere })
+        : Promise.resolve({ count: 0 })
+    ]);
+
+    return {
+      deletedItemsCount: itemsResult.count,
+      deletedSavingsCount: savingsResult.count,
+      deletedCount: itemsResult.count + savingsResult.count
+    };
+  });
+
+  return result;
+}
+
 export async function listSalaryCandidates(userId: string, filters: SalaryCandidatesInput) {
   const where = salaryCandidateWhere(userId, filters);
   const skip = (filters.page - 1) * filters.limit;
@@ -236,6 +493,7 @@ export async function listSalaryCandidates(userId: string, filters: SalaryCandid
 }
 
 export async function createFinancialItem(userId: string, input: CreateFinancialItemInput) {
+  assertNotManualSavingsRedemption(input);
   const data = normalizeWriteInput(input);
   const item = await prisma.financialItem.create({
     data: {
@@ -254,6 +512,11 @@ export async function updateFinancialItem(userId: string, id: string, input: Upd
     error.statusCode = 404;
     throw error;
   }
+  assertNotManualSavingsRedemption({
+    ...input,
+    type: input.type ?? existing.type,
+    category: input.category ?? existing.category
+  });
 
   const item = await prisma.financialItem.update({
     where: { id },
@@ -428,6 +691,10 @@ export async function updateFinancialItemValue(userId: string, id: string, input
     error.statusCode = 404;
     throw error;
   }
+  assertNotManualSavingsRedemption({
+    type: existing.type,
+    category: existing.category
+  });
 
   const updateData = {
     amount: input.amount,
@@ -437,7 +704,7 @@ export async function updateFinancialItemValue(userId: string, id: string, input
   if (input.scope === 'ONLY_THIS_PERIOD') {
     await prisma.financialItem.update({ where: { id: existing.id }, data: updateData });
   } else {
-    const months = targetMonthsForValueUpdate(existing.month, input.scope);
+    const months = boundedTargetMonths(existing.month, input.scope, input.endMonth);
     const selectedDate = input.date;
     const occurrenceDay = existing.dueDay ?? existing.dueDate?.getDate() ?? selectedDate.getDate();
     const recurrenceGroupId =
@@ -521,7 +788,7 @@ export async function updateFinancialItemValue(userId: string, id: string, input
         category: existing.category,
         name: existing.name,
         year: existing.year,
-        month: { in: targetMonthsForValueUpdate(existing.month, input.scope) },
+        month: { in: boundedTargetMonths(existing.month, input.scope, input.endMonth) },
         recurrenceGroupId: existing.recurrenceGroupId ?? `${userId}:${existing.type}:${existing.category}:${existing.name}:${existing.year}`
       };
 

@@ -35,6 +35,9 @@ function sanitizeUser(user: {
   planNameSnapshot?: string | null;
   planPriceSnapshot?: unknown | null;
   planDurationMonthsSnapshot?: number | null;
+  planProductKeysSnapshot?: string[] | null;
+  planProductLabelsSnapshot?: unknown;
+  planIncludedItemsSnapshot?: string[] | null;
   couponCodeSnapshot?: string | null;
   couponDiscountSnapshot?: unknown | null;
   subscriptionCurrentPeriodEnd?: Date | null;
@@ -48,7 +51,8 @@ function sanitizeUser(user: {
     trialEndsAt: user.trialEndsAt ?? null,
     manualAccessUntil: user.manualAccessUntil ?? null,
     accessBlockedAt: user.accessBlockedAt ?? null,
-    subscriptionCurrentPeriodEnd: user.subscriptionCurrentPeriodEnd ?? null
+    subscriptionCurrentPeriodEnd: user.subscriptionCurrentPeriodEnd ?? null,
+    planProductKeysSnapshot: user.planProductKeysSnapshot ?? null
   });
   return {
     id: user.id,
@@ -77,6 +81,9 @@ function sanitizeUser(user: {
     planNameSnapshot: user.planNameSnapshot ?? null,
     planPriceSnapshot: user.planPriceSnapshot ? Number(user.planPriceSnapshot) : null,
     planDurationMonthsSnapshot: user.planDurationMonthsSnapshot ?? null,
+    planProductKeysSnapshot: user.planProductKeysSnapshot ?? [],
+    planProductLabelsSnapshot: user.planProductLabelsSnapshot ?? {},
+    planIncludedItemsSnapshot: user.planIncludedItemsSnapshot ?? [],
     couponCodeSnapshot: user.couponCodeSnapshot ?? null,
     couponDiscountSnapshot: user.couponDiscountSnapshot ? Number(user.couponDiscountSnapshot) : null,
     subscriptionCurrentPeriodEnd: user.subscriptionCurrentPeriodEnd ?? null,
@@ -100,6 +107,9 @@ function adminLifetimeAccessData() {
     planNameSnapshot: 'Vitalício',
     planPriceSnapshot: 0,
     planDurationMonthsSnapshot: null,
+    planProductKeysSnapshot: [],
+    planProductLabelsSnapshot: {},
+    planIncludedItemsSnapshot: [],
     couponCodeSnapshot: null,
     couponDiscountSnapshot: null,
     subscriptionCurrentPeriodEnd: null

@@ -49,6 +49,9 @@ const userSelect = {
   planNameSnapshot: true,
   planPriceSnapshot: true,
   planDurationMonthsSnapshot: true,
+  planProductKeysSnapshot: true,
+  planProductLabelsSnapshot: true,
+  planIncludedItemsSnapshot: true,
   couponCodeSnapshot: true,
   couponDiscountSnapshot: true,
   subscriptionCurrentPeriodEnd: true,
@@ -65,6 +68,7 @@ function serializeUser(user: {
   accessBlockedAt: Date | null;
   subscriptionCurrentPeriodEnd: Date | null;
   planPriceSnapshot?: unknown | null;
+  planProductKeysSnapshot?: string[] | null;
   [key: string]: unknown;
 }) {
   return {
