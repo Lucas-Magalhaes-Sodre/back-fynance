@@ -1,5 +1,6 @@
 import { FinancialItemType, PaymentStatus, Prisma, RecurrenceType } from '@prisma/client';
 import { prisma } from '../../shared/prisma.js';
+import { SAVINGS_REDEMPTION_INCOME_CATEGORY } from '../../shared/system-categories.js';
 import type {
   BulkDeleteFinancialScopeInput,
   CreateFinancialItemInput,
@@ -58,6 +59,37 @@ function normalizeType(type: CreateFinancialItemInput['type'] | UpdateFinancialI
   if (type === FinancialItemType.INCOME) return FinancialItemType.INCOME;
   if (type === FinancialItemType.EXPENSE) return FinancialItemType.EXPENSE;
   return undefined;
+}
+
+function normalizeCategoryName(name: string) {
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLocaleLowerCase('pt-BR')
+    .trim();
+}
+
+function assertNotManualSavingsRedemption(input: {
+  type?: CreateFinancialItemInput['type'] | UpdateFinancialItemInput['type'] | FinancialItemType;
+  category?: string | null;
+}) {
+  const rawType = String(input.type ?? '');
+  const type =
+    rawType === FinancialItemType.INCOME
+      ? FinancialItemType.INCOME
+      : rawType === FinancialItemType.EXPENSE
+        ? FinancialItemType.EXPENSE
+        : undefined;
+  const category = input.category;
+  if (
+    type === FinancialItemType.INCOME &&
+    category &&
+    normalizeCategoryName(category) === normalizeCategoryName(SAVINGS_REDEMPTION_INCOME_CATEGORY)
+  ) {
+    const error = new Error('A categoria Resgate de economia so pode ser usada ao resgatar uma economia') as Error & { statusCode: number };
+    error.statusCode = 400;
+    throw error;
+  }
 }
 
 function isExpenseType(type: FinancialItemType | undefined) {
@@ -461,6 +493,7 @@ export async function listSalaryCandidates(userId: string, filters: SalaryCandid
 }
 
 export async function createFinancialItem(userId: string, input: CreateFinancialItemInput) {
+  assertNotManualSavingsRedemption(input);
   const data = normalizeWriteInput(input);
   const item = await prisma.financialItem.create({
     data: {
@@ -479,6 +512,11 @@ export async function updateFinancialItem(userId: string, id: string, input: Upd
     error.statusCode = 404;
     throw error;
   }
+  assertNotManualSavingsRedemption({
+    ...input,
+    type: input.type ?? existing.type,
+    category: input.category ?? existing.category
+  });
 
   const item = await prisma.financialItem.update({
     where: { id },
@@ -653,6 +691,10 @@ export async function updateFinancialItemValue(userId: string, id: string, input
     error.statusCode = 404;
     throw error;
   }
+  assertNotManualSavingsRedemption({
+    type: existing.type,
+    category: existing.category
+  });
 
   const updateData = {
     amount: input.amount,

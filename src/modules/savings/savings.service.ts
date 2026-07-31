@@ -1,5 +1,9 @@
 import { FinancialItemType, Prisma, RecurrenceType } from '@prisma/client';
 import { prisma } from '../../shared/prisma.js';
+import {
+  SAVINGS_REDEMPTION_INCOME_CATEGORY,
+  SAVINGS_REDEMPTION_INCOME_ITEM
+} from '../../shared/system-categories.js';
 import type {
   CreateSavingInput,
   ListSavingsInput,
@@ -288,15 +292,31 @@ export async function transferSavings(userId: string, input: SavingsTransferInpu
 
     let income = null;
     if (input.direction === 'WITHDRAW_TO_BALANCE') {
+      await tx.financialCategory.upsert({
+        where: {
+          userId_type_name: {
+            userId,
+            type: FinancialItemType.INCOME,
+            name: SAVINGS_REDEMPTION_INCOME_CATEGORY
+          }
+        },
+        create: {
+          userId,
+          type: FinancialItemType.INCOME,
+          name: SAVINGS_REDEMPTION_INCOME_CATEGORY,
+          color: '#0F766E'
+        },
+        update: {}
+      });
       income = await tx.financialItem.create({
         data: {
           userId,
-          title: input.title,
-          name: input.title,
+          title: SAVINGS_REDEMPTION_INCOME_ITEM,
+          name: SAVINGS_REDEMPTION_INCOME_ITEM,
           description,
           amount: input.amount,
           type: FinancialItemType.INCOME,
-          category: 'Economias',
+          category: SAVINGS_REDEMPTION_INCOME_CATEGORY,
           date,
           paymentDate: date,
           status: 'PAGO',
