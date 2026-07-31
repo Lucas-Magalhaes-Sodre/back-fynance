@@ -22,9 +22,13 @@ export const appSettingsSchema = z.object({
 export const billingPlanSchema = z.object({
   name: z.string().trim().min(2).max(80),
   description: z.string().trim().max(240).optional().nullable(),
+  originalPrice: z.coerce.number().min(0).max(999999).optional().nullable(),
   price: z.coerce.number().min(0).max(999999),
   currency: z.string().trim().min(3).max(3).default('BRL'),
   durationMonths: z.coerce.number().int().min(1).max(120),
+  productKeys: z.array(z.string().trim().min(1)).optional().default([]),
+  productLabels: z.record(z.string().trim().max(60)).optional().default({}),
+  includedItems: z.array(z.string().trim().max(100)).max(30).optional().default([]),
   active: z.boolean().default(true),
   sortOrder: z.coerce.number().int().min(0).max(9999).default(0)
 });

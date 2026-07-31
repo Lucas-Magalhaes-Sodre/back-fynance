@@ -1,5 +1,6 @@
 import type { SubscriptionStatus, UserRole } from '@prisma/client';
 import { env } from '../../shared/env.js';
+import { PLAN_PRODUCT_KEYS, hasPlanProductAccess, normalizePlanProductKeys } from '../../shared/plan-products.js';
 
 export function trialEndDate(from = new Date()) {
   const date = new Date(from);
@@ -28,6 +29,7 @@ export function accessInfo(user: {
   manualAccessUntil: Date | null;
   accessBlockedAt: Date | null;
   subscriptionCurrentPeriodEnd: Date | null;
+  planProductKeysSnapshot?: string[] | null;
 }) {
   const now = new Date();
   const isAdmin = user.role === 'ADMIN';
@@ -48,6 +50,7 @@ export function accessInfo(user: {
     hasManualAccess,
     hasTrialAccess,
     hasPaidAccess,
+    productKeys: isAdmin || !hasPaidAccess ? PLAN_PRODUCT_KEYS : normalizePlanProductKeys(user.planProductKeysSnapshot),
     reason: canAccess
       ? null
       : user.subscriptionStatus === 'PAST_DUE'
@@ -56,4 +59,12 @@ export function accessInfo(user: {
           ? 'SUBSCRIPTION_CANCELED'
           : 'ACCESS_EXPIRED'
   };
+}
+
+export function canAccessProduct(user: Parameters<typeof accessInfo>[0], productKey: string) {
+  const access = accessInfo(user);
+  if (!access.canAccess) return false;
+  if (access.isAdmin || access.hasTrialAccess || access.hasManualAccess || user.subscriptionStatus === 'MANUAL') return true;
+  if (!access.hasPaidAccess) return true;
+  return hasPlanProductAccess({ productKey, productKeys: user.planProductKeysSnapshot });
 }

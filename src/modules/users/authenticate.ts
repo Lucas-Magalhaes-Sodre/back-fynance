@@ -1,6 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { prisma } from '../../shared/prisma.js';
-import { accessInfo } from '../billing/access.service.js';
+import { accessInfo, canAccessProduct } from '../billing/access.service.js';
 
 const accessFreePrefixes = [
   '/users/me',
@@ -9,6 +9,26 @@ const accessFreePrefixes = [
   '/billing',
   '/admin'
 ];
+
+function productForPath(path: string) {
+  if (path.startsWith('/credit-cards')) return ['cards'];
+  if (path.startsWith('/savings')) return ['savings'];
+  if (path.startsWith('/financial-goals')) return ['goals'];
+  if (path.startsWith('/financial-categories')) return ['settings', 'financial-control', 'birthdays', 'savings'];
+  if (path.startsWith('/financial-items') || path.startsWith('/financial-reminders') || path.startsWith('/push-notifications')) {
+    return ['financial-control', 'birthdays', 'savings'];
+  }
+  if (
+    path.startsWith('/financial-control') ||
+    path.startsWith('/financial-summary') ||
+    path.startsWith('/financial-calendar') ||
+    path.startsWith('/financial-comparison') ||
+    path.startsWith('/financial-insights')
+  ) {
+    return ['financial-control'];
+  }
+  return null;
+}
 
 export async function authenticate(request: FastifyRequest, reply: FastifyReply) {
   try {
@@ -25,7 +45,8 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
       trialEndsAt: true,
       manualAccessUntil: true,
       accessBlockedAt: true,
-      subscriptionCurrentPeriodEnd: true
+      subscriptionCurrentPeriodEnd: true,
+      planProductKeysSnapshot: true
     }
   });
 
@@ -40,6 +61,16 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
     return reply.status(402).send({
       message: 'Assinatura necessaria para continuar',
       code: 'SUBSCRIPTION_REQUIRED',
+      access
+    });
+  }
+
+  const productKey = productForPath(path);
+  if (!isFreeRoute && productKey && !productKey.some((key) => canAccessProduct(user, key))) {
+    return reply.status(403).send({
+      message: 'Seu plano atual nao inclui este recurso',
+      code: 'PRODUCT_NOT_INCLUDED',
+      productKey: productKey[0],
       access
     });
   }
