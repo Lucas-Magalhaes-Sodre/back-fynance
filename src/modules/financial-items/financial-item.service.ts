@@ -552,6 +552,10 @@ export async function deleteFinancialScope(userId: string, input: BulkDeleteFina
     input.scope === 'ALL_TABLE' ||
     (input.scope === 'CATEGORY' && input.type === 'INVESTMENT') ||
     (input.scope === 'SELECTED_SUBITEMS' && selectedSavings.length > 0);
+  const linkedItems = shouldDeleteItems
+    ? await prisma.financialItem.findMany({ where: itemWhere })
+    : [];
+  await deleteLinkedCreditCardPurchasesForItems(userId, linkedItems);
 
   const result = await prisma.$transaction(async (tx) => {
     const [itemsResult, savingsResult, creditCardResult] = await Promise.all([
@@ -682,6 +686,7 @@ export async function deleteFinancialItem(userId: string, id: string) {
     throw error;
   }
 
+  await clearCreditCardPaymentLink(userId, existing);
   await prisma.financialItem.delete({ where: { id } });
 }
 
@@ -708,6 +713,8 @@ export async function deleteFinancialCategory(userId: string, input: CategoryAct
     type: { in: typeFilter(input.type) },
     year: input.year
   };
+  const linkedItems = await prisma.financialItem.findMany({ where });
+  await deleteLinkedCreditCardPurchasesForItems(userId, linkedItems);
 
   const result = await prisma.$transaction(async (tx) => {
     const [itemsResult, creditCardResult] = await Promise.all([
@@ -843,6 +850,19 @@ async function clearCreditCardPaymentLink(userId: string, item: Item) {
     linkedCreditCardInstallments: null,
     linkedCreditCardAmount: null
   };
+}
+
+async function deleteLinkedCreditCardPurchasesForItems(userId: string, items: Item[]) {
+  const linkedItems = items.filter((item) => item.linkedCreditCardPurchaseId);
+  const purchaseIds = new Set<string>();
+
+  for (const item of linkedItems) {
+    if (!item.linkedCreditCardPurchaseId || purchaseIds.has(item.linkedCreditCardPurchaseId)) continue;
+    purchaseIds.add(item.linkedCreditCardPurchaseId);
+    await clearCreditCardPaymentLink(userId, item);
+  }
+
+  return { deletedLinkedPurchasesCount: purchaseIds.size };
 }
 
 async function upsertCreditCardPaymentLink(userId: string, item: Item, input: UpdateFinancialItemValueInput) {
