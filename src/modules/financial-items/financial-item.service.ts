@@ -69,6 +69,88 @@ function normalizeCategoryName(name: string) {
     .trim();
 }
 
+function monthCursor(year: number, month: number) {
+  return year * 12 + month;
+}
+
+function monthDiff(startYear: number, startMonth: number, targetYear: number, targetMonth: number) {
+  return monthCursor(targetYear, targetMonth) - monthCursor(startYear, startMonth);
+}
+
+function creditCardInstallmentNumberForMonth(
+  purchase: { purchaseDate: Date; installments: number; skippedInstallments?: number[] },
+  month: number,
+  year: number
+) {
+  const purchaseMonth = purchase.purchaseDate.getMonth() + 1;
+  const purchaseYear = purchase.purchaseDate.getFullYear();
+  const installmentIndex = monthDiff(purchaseYear, purchaseMonth, year, month);
+  if (installmentIndex < 0 || installmentIndex >= purchase.installments) return null;
+  if (purchase.skippedInstallments?.includes(installmentIndex + 1)) return null;
+
+  return installmentIndex + 1;
+}
+
+function isCreditCardExpenseCategory(category?: string | null, type?: FinancialItemType | 'INCOME' | 'EXPENSE' | 'INVESTMENT') {
+  const normalizedType = String(type ?? '');
+  if (normalizedType && normalizedType !== FinancialItemType.EXPENSE) return false;
+  const normalizedCategory = normalizeCategoryName(category ?? '');
+  return normalizedCategory === 'cartao de credito' || normalizedCategory === 'cartoes de credito' || normalizedCategory === 'cartoes';
+}
+
+async function removeCreditCardPurchaseInstallmentsForYear(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  year: number,
+  cardNames?: string[]
+) {
+  const normalizedCardNames = cardNames?.map(normalizeCategoryName).filter(Boolean) ?? [];
+  const cards = await tx.creditCard.findMany({
+    where: { userId },
+    select: { id: true, name: true }
+  });
+  const targetCardIds = normalizedCardNames.length
+    ? cards
+        .filter((card) => normalizedCardNames.includes(normalizeCategoryName(card.name)))
+        .map((card) => card.id)
+    : cards.map((card) => card.id);
+
+  if (!targetCardIds.length) return { deletedPurchasesCount: 0, updatedPurchasesCount: 0 };
+
+  const purchases = await tx.creditCardPurchase.findMany({
+    where: {
+      userId,
+      cardId: { in: targetCardIds }
+    }
+  });
+
+  let deletedPurchasesCount = 0;
+  let updatedPurchasesCount = 0;
+
+  for (const purchase of purchases) {
+    const installmentsInYear = Array.from({ length: 12 }, (_, index) =>
+      creditCardInstallmentNumberForMonth(purchase, index + 1, year)
+    ).filter((installmentNumber): installmentNumber is number => installmentNumber !== null);
+
+    if (!installmentsInYear.length) continue;
+
+    const skippedInstallments = Array.from(new Set([...purchase.skippedInstallments, ...installmentsInYear])).sort((a, b) => a - b);
+    if (skippedInstallments.length >= purchase.installments) {
+      await tx.creditCardPurchase.delete({ where: { id: purchase.id } });
+      deletedPurchasesCount += 1;
+      continue;
+    }
+
+    await tx.creditCardPurchase.update({
+      where: { id: purchase.id },
+      data: { skippedInstallments }
+    });
+    updatedPurchasesCount += 1;
+  }
+
+  return { deletedPurchasesCount, updatedPurchasesCount };
+}
+
 function assertNotManualSavingsRedemption(input: {
   type?: CreateFinancialItemInput['type'] | UpdateFinancialItemInput['type'] | FinancialItemType;
   category?: string | null;
@@ -402,6 +484,12 @@ export async function deleteFinancialScope(userId: string, input: BulkDeleteFina
   const selectedItems = input.subItems ?? [];
   const selectedFinancialItems = selectedItems.filter((item) => item.type !== 'INVESTMENT');
   const selectedSavings = selectedItems.filter((item) => item.type === 'INVESTMENT');
+  const selectedCreditCardItems = selectedFinancialItems.filter((item) => isCreditCardExpenseCategory(item.category, item.type));
+  const shouldDeleteCreditCardPurchases =
+    input.scope === 'ALL_EXPENSE' ||
+    input.scope === 'ALL_TABLE' ||
+    (input.scope === 'CATEGORY' && isCreditCardExpenseCategory(input.category, input.type)) ||
+    (input.scope === 'SELECTED_SUBITEMS' && selectedCreditCardItems.length > 0);
   const itemTypes = input.scope === 'ALL_INCOME'
     ? [FinancialItemType.INCOME]
     : input.scope === 'ALL_EXPENSE'
@@ -449,19 +537,29 @@ export async function deleteFinancialScope(userId: string, input: BulkDeleteFina
     (input.scope === 'SELECTED_SUBITEMS' && selectedSavings.length > 0);
 
   const result = await prisma.$transaction(async (tx) => {
-    const [itemsResult, savingsResult] = await Promise.all([
+    const [itemsResult, savingsResult, creditCardResult] = await Promise.all([
       shouldDeleteItems
         ? tx.financialItem.deleteMany({ where: itemWhere })
         : Promise.resolve({ count: 0 }),
       shouldDeleteSavings
         ? tx.savings.deleteMany({ where: savingWhere })
-        : Promise.resolve({ count: 0 })
+        : Promise.resolve({ count: 0 }),
+      shouldDeleteCreditCardPurchases
+        ? removeCreditCardPurchaseInstallmentsForYear(
+            tx,
+            userId,
+            input.year,
+            input.scope === 'SELECTED_SUBITEMS' ? selectedCreditCardItems.map((item) => item.name) : undefined
+          )
+        : Promise.resolve({ deletedPurchasesCount: 0, updatedPurchasesCount: 0 })
     ]);
 
     return {
       deletedItemsCount: itemsResult.count,
       deletedSavingsCount: savingsResult.count,
-      deletedCount: itemsResult.count + savingsResult.count
+      deletedCreditCardPurchasesCount: creditCardResult.deletedPurchasesCount,
+      updatedCreditCardPurchasesCount: creditCardResult.updatedPurchasesCount,
+      deletedCount: itemsResult.count + savingsResult.count + creditCardResult.deletedPurchasesCount
     };
   });
 
@@ -594,8 +692,23 @@ export async function deleteFinancialCategory(userId: string, input: CategoryAct
     year: input.year
   };
 
-  const result = await prisma.financialItem.deleteMany({ where });
-  return { deletedCount: result.count };
+  const result = await prisma.$transaction(async (tx) => {
+    const [itemsResult, creditCardResult] = await Promise.all([
+      tx.financialItem.deleteMany({ where }),
+      input.year && isCreditCardExpenseCategory(input.category, input.type)
+        ? removeCreditCardPurchaseInstallmentsForYear(tx, userId, input.year)
+        : Promise.resolve({ deletedPurchasesCount: 0, updatedPurchasesCount: 0 })
+    ]);
+
+    return {
+      deletedCount: itemsResult.count + creditCardResult.deletedPurchasesCount,
+      deletedItemsCount: itemsResult.count,
+      deletedCreditCardPurchasesCount: creditCardResult.deletedPurchasesCount,
+      updatedCreditCardPurchasesCount: creditCardResult.updatedPurchasesCount
+    };
+  });
+
+  return result;
 }
 
 export async function getDashboard(userId: string) {
