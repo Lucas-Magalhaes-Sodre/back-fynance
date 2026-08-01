@@ -44,7 +44,14 @@ const financialItemBaseSchema = z.object({
   dueDate: z.coerce.date().optional().nullable(),
   paymentDate: z.coerce.date().optional().nullable(),
   status: paymentStatusSchema.optional(),
-  date: z.coerce.date()
+  date: z.coerce.date(),
+  recurrenceGeneration: z.object({
+    mode: z.enum(['ALL_YEAR', 'FROM_SELECTED_MONTH', 'CUSTOM']),
+    startMonth: z.coerce.number().int().min(1).max(12),
+    startYear: z.coerce.number().int().min(1900).max(3000),
+    endMonth: z.coerce.number().int().min(1).max(12),
+    endYear: z.coerce.number().int().min(1900).max(3000)
+  }).optional()
 });
 
 const periodFilterSchema = z.object({

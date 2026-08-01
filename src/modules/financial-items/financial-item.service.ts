@@ -613,6 +613,61 @@ export async function listSalaryCandidates(userId: string, filters: SalaryCandid
 
 export async function createFinancialItem(userId: string, input: CreateFinancialItemInput) {
   assertNotManualSavingsRedemption(input);
+  if (input.recurrenceType === RecurrenceType.MONTHLY && input.recurrenceGeneration) {
+    const generation = input.recurrenceGeneration;
+    const startMonth = generation.mode === 'ALL_YEAR' ? 1 : generation.startMonth;
+    const startYear = generation.startYear;
+    const endMonth = generation.endMonth;
+    const endYear = generation.endYear;
+    const startCursor = monthCursor(startYear, startMonth);
+    const endCursor = monthCursor(endYear, endMonth);
+    const dueDay = input.dueDay ?? input.date.getDate();
+
+    if (endCursor < startCursor) {
+      const error = new Error('Periodo final da recorrencia anterior ao periodo inicial') as Error & { statusCode: number };
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const recurrenceGroupId =
+      input.recurrenceGroupId ??
+      `${userId}:${input.type}:${input.category ?? 'Outros'}:${input.name ?? input.title ?? 'Lancamento'}:${Date.now()}`;
+    const items = await prisma.$transaction(
+      Array.from({ length: endCursor - startCursor + 1 }, (_, index) => {
+        const cursor = startCursor + index;
+        const occurrenceYear = Math.floor((cursor - 1) / 12);
+        const occurrenceMonth = ((cursor - 1) % 12) + 1;
+        const occurrenceDate = dateForMonthlyOccurrence(occurrenceYear, occurrenceMonth, dueDay);
+        const isExpense = input.type === 'EXPENSE';
+        const data = normalizeWriteInput({
+          ...input,
+          date: occurrenceDate,
+          month: occurrenceMonth,
+          year: occurrenceYear,
+          dueDate: isExpense ? occurrenceDate : null,
+          paymentDate: isExpense ? null : occurrenceDate,
+          status: isExpense ? PaymentStatus.PENDENTE : PaymentStatus.PAGO,
+          isFixed: true,
+          recurrenceType: RecurrenceType.MONTHLY,
+          recurrenceGroupId,
+          recurrenceGeneration: undefined
+        });
+
+        return prisma.financialItem.create({
+          data: {
+            userId,
+            ...data
+          }
+        });
+      })
+    );
+
+    return {
+      item: serializeItem(items[0]),
+      items: items.map(serializeItem)
+    };
+  }
+
   const data = normalizeWriteInput(input);
   const item = await prisma.financialItem.create({
     data: {
@@ -621,7 +676,10 @@ export async function createFinancialItem(userId: string, input: CreateFinancial
     }
   });
 
-  return serializeItem(item);
+  return {
+    item: serializeItem(item),
+    items: [serializeItem(item)]
+  };
 }
 
 export async function updateFinancialItem(userId: string, id: string, input: UpdateFinancialItemInput) {

@@ -12,6 +12,7 @@ import type {
   SavingsProjectionInput,
   SavingsSummaryInput,
   SavingsTransferInput,
+  SavingsUpdateGroupInput,
   UpdateSavingInput
 } from './savings.schemas.js';
 
@@ -68,6 +69,10 @@ function savingsMovementType(amount: Prisma.Decimal | number) {
   return toNumber(amount) >= 0 ? 'DEPOSIT' : 'WITHDRAW';
 }
 
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
 function syntheticCategoryId(name: string) {
   return `category:${name}`;
 }
@@ -112,7 +117,8 @@ function serializeExtractItem(saving: Awaited<ReturnType<typeof prisma.savings.f
     subItemName: saving.title,
     description: saving.description,
     registeredAt: saving.createdAt,
-    movementDate: saving.date
+    movementDate: saving.date,
+    isInitialBalance: saving.isInitialBalance
   };
 }
 
@@ -387,6 +393,89 @@ export async function deleteSavingsGroup(userId: string, input: SavingsDeleteGro
   };
   const result = await prisma.savings.deleteMany({ where });
   return { deletedCount: result.count };
+}
+
+export async function updateSavingsGroup(userId: string, input: SavingsUpdateGroupInput) {
+  const where: Prisma.SavingsWhereInput = {
+    userId,
+    category: input.category,
+    title: input.title
+  };
+  const existing = await prisma.savings.findMany({ where });
+  if (!existing.length) {
+    const error = new Error('Economia nao encontrada') as Error & { statusCode: number };
+    error.statusCode = 404;
+    throw error;
+  }
+
+  await assertGoalOwnership(userId, input.goalId);
+
+  const today = endOfToday();
+  const currentBalance = existing
+    .filter((saving) => saving.date <= today)
+    .reduce((sum, saving) => sum + projectedSavingAmount(saving), 0);
+  const nextCategory = input.nextCategory?.trim() || input.category;
+  const nextTitle = input.nextTitle?.trim() || input.title;
+  const nextColor = input.color?.toUpperCase() ?? existing[0].color;
+  const nextHasYield = input.hasYield ?? existing.some((saving) => saving.hasYield);
+  const nextYieldRateMonthly = nextHasYield
+    ? input.yieldRateMonthly ?? toNumber(existing.find((saving) => saving.hasYield)?.yieldRateMonthly ?? 0)
+    : null;
+  const delta =
+    input.targetBalance === undefined
+      ? 0
+      : roundMoney(input.targetBalance - currentBalance);
+  const adjustmentDate = startOfToday();
+
+  const [updated, adjustment] = await prisma.$transaction(async (tx) => {
+    const updatedGroup = await tx.savings.updateMany({
+      where,
+      data: {
+        title: nextTitle,
+        category: nextCategory,
+        color: nextColor,
+        description: input.description,
+        goalId: input.goalId,
+        hasYield: input.hasYield,
+        yieldRateMonthly: input.hasYield === false ? null : input.yieldRateMonthly
+      }
+    });
+
+    const adjustmentSaving =
+      Math.abs(delta) >= 0.01
+        ? await tx.savings.create({
+            data: {
+              userId,
+              title: nextTitle,
+              category: nextCategory,
+              color: nextColor,
+              description:
+                input.description ??
+                `Ajuste de saldo para R$ ${input.targetBalance?.toFixed(2).replace('.', ',')}`,
+              amount: delta,
+              date: adjustmentDate,
+              month: adjustmentDate.getMonth() + 1,
+              year: adjustmentDate.getFullYear(),
+              isFixed: false,
+              recurrenceType: RecurrenceType.NONE,
+              isInitialBalance: true,
+              goalId: input.goalId,
+              hasYield: nextHasYield,
+              yieldRateMonthly: nextYieldRateMonthly
+            }
+          })
+        : null;
+
+    return [updatedGroup, adjustmentSaving] as const;
+  });
+
+  return {
+    updatedCount: updated.count,
+    adjustment: adjustment ? serializeSaving(adjustment) : null,
+    previousBalance: roundMoney(currentBalance),
+    targetBalance: input.targetBalance ?? null,
+    delta
+  };
 }
 
 export async function getSavingsOverview(userId: string) {

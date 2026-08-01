@@ -45,8 +45,8 @@ export async function salaryCandidatesController(request: FastifyRequest, reply:
 
 export async function createFinancialItemController(request: FastifyRequest, reply: FastifyReply) {
   const data = createFinancialItemSchema.parse(request.body);
-  const item = await createFinancialItem(request.user.sub, data);
-  return reply.status(201).send({ item });
+  const result = await createFinancialItem(request.user.sub, data);
+  return reply.status(201).send(result);
 }
 
 export async function copyFinancialCategoryController(request: FastifyRequest, reply: FastifyReply) {
