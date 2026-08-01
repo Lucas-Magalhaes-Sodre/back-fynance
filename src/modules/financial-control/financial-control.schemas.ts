@@ -30,7 +30,7 @@ export const yearQuerySchema = z.object({
 export const financialTablePreferenceSchema = z.object({
   groupsSeparated: z.coerce.boolean().optional(),
   tableScale: z.coerce.number().int().min(-2).max(2).optional(),
-  categoryColumnWidth: z.coerce.number().int().min(132).max(420).optional(),
+  categoryColumnWidth: z.coerce.number().min(132).max(420).transform((value) => Math.round(value)).optional(),
   categoryGroupsExpanded: z.coerce.boolean().optional(),
   subitemsExpanded: z.coerce.boolean().optional()
 });
