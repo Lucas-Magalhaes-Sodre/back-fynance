@@ -1,5 +1,5 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { getDefaultTrialDays } from '../admin/admin.service.js';
+import { getAppSettings } from '../admin/admin.service.js';
 import { checkoutSchema, couponValidationSchema } from './billing.schemas.js';
 import { createCheckout, getBillingStatus, listPublicBillingPlans, processMercadoPagoWebhook, validateBillingCoupon } from './billing.service.js';
 
@@ -34,6 +34,6 @@ export async function mercadoPagoWebhookController(request: FastifyRequest, repl
 }
 
 export async function billingPublicSettingsController(_request: FastifyRequest, reply: FastifyReply) {
-  const defaultTrialDays = await getDefaultTrialDays();
-  return reply.send({ settings: { defaultTrialDays } });
+  const settings = await getAppSettings();
+  return reply.send({ settings });
 }

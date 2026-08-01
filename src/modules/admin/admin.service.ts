@@ -246,6 +246,33 @@ export async function getDefaultTrialDays() {
   return Number.isFinite(value) ? value : env.DEFAULT_TRIAL_DAYS;
 }
 
+function normalizeFooterContacts(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { contactEmails: [] as string[], contactPhones: [] as string[], contactMessage: '' };
+  }
+  const data = value as Record<string, unknown>;
+  return {
+    contactEmails: Array.isArray(data.contactEmails)
+      ? data.contactEmails.filter((item): item is string => typeof item === 'string').slice(0, 5)
+      : [],
+    contactPhones: Array.isArray(data.contactPhones)
+      ? data.contactPhones.filter((item): item is string => typeof item === 'string').slice(0, 5)
+      : [],
+    contactMessage: typeof data.contactMessage === 'string' ? data.contactMessage : ''
+  };
+}
+
+export async function getAppSettings() {
+  const [defaultTrialDays, footerContactsSetting] = await Promise.all([
+    getDefaultTrialDays(),
+    prisma.appSetting.findUnique({ where: { key: 'FOOTER_CONTACTS' } })
+  ]);
+  return {
+    defaultTrialDays,
+    ...normalizeFooterContacts(footerContactsSetting?.value)
+  };
+}
+
 export async function getAdminBillingOverview() {
   const users = await prisma.user.findMany({ select: adminUserSelect });
   const activeUsers = users.filter((user) => withAccess(user).access.hasPaidAccess);
@@ -288,12 +315,32 @@ export async function getAdminBillingOverview() {
 }
 
 export async function updateAppSettings(input: AppSettingsInput) {
-  await prisma.appSetting.upsert({
-    where: { key: 'DEFAULT_TRIAL_DAYS' },
-    create: { key: 'DEFAULT_TRIAL_DAYS', value: input.defaultTrialDays },
-    update: { value: input.defaultTrialDays }
-  });
-  return { defaultTrialDays: input.defaultTrialDays };
+  await prisma.$transaction([
+    prisma.appSetting.upsert({
+      where: { key: 'DEFAULT_TRIAL_DAYS' },
+      create: { key: 'DEFAULT_TRIAL_DAYS', value: input.defaultTrialDays },
+      update: { value: input.defaultTrialDays }
+    }),
+    prisma.appSetting.upsert({
+      where: { key: 'FOOTER_CONTACTS' },
+      create: {
+        key: 'FOOTER_CONTACTS',
+        value: {
+          contactEmails: input.contactEmails,
+          contactPhones: input.contactPhones,
+          contactMessage: input.contactMessage
+        }
+      },
+      update: {
+        value: {
+          contactEmails: input.contactEmails,
+          contactPhones: input.contactPhones,
+          contactMessage: input.contactMessage
+        }
+      }
+    })
+  ]);
+  return getAppSettings();
 }
 
 export async function updateAdminUserSubscription(userId: string, input: AdminUpdateSubscriptionInput) {

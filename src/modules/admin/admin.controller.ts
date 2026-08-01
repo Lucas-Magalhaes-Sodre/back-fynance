@@ -10,7 +10,7 @@ import {
   deactivateAdminBillingCoupon,
   deactivateAdminBillingPlan,
   getAdminBillingOverview,
-  getDefaultTrialDays,
+  getAppSettings,
   grantTrial,
   listAdminAuditLogs,
   listAdminBillingCoupons,
@@ -116,8 +116,8 @@ export async function adminBillingOverviewController(_request: FastifyRequest, r
 }
 
 export async function getAppSettingsController(_request: FastifyRequest, reply: FastifyReply) {
-  const defaultTrialDays = await getDefaultTrialDays();
-  return reply.send({ settings: { defaultTrialDays } });
+  const settings = await getAppSettings();
+  return reply.send({ settings });
 }
 
 export async function updateAppSettingsController(request: FastifyRequest, reply: FastifyReply) {

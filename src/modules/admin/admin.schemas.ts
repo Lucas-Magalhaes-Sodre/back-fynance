@@ -16,7 +16,10 @@ export const grantTrialSchema = z.object({
 });
 
 export const appSettingsSchema = z.object({
-  defaultTrialDays: z.coerce.number().int().min(0).max(3650)
+  defaultTrialDays: z.coerce.number().int().min(0).max(3650),
+  contactEmails: z.array(z.string().trim().email()).max(5).optional().default([]),
+  contactPhones: z.array(z.string().trim().min(3).max(40)).max(5).optional().default([]),
+  contactMessage: z.string().trim().max(180).optional().default('')
 });
 
 export const billingPlanSchema = z.object({
