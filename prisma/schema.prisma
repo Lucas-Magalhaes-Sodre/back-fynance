@@ -378,6 +378,11 @@ model FinancialItem {
   isFixed     Boolean           @default(false)
   recurrenceType RecurrenceType @default(NONE)
   recurrenceGroupId String?
+  excludedFromTotals Boolean @default(false)
+  linkedCreditCardId String?
+  linkedCreditCardPurchaseId String?
+  linkedCreditCardInstallments Int?
+  linkedCreditCardAmount Decimal? @db.Decimal(12, 2)
   reminders   FinancialReminder[]
   date        DateTime
   month       Int

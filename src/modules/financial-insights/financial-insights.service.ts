@@ -43,8 +43,9 @@ function currentStatus(item: Pick<Item, 'type' | 'dueDate' | 'paymentDate' | 'st
 }
 
 function totals(items: Item[]) {
-  const income = items.filter((item) => isIncome(item.type)).reduce((sum, item) => sum + toNumber(item.amount), 0);
-  const expense = items.filter((item) => isExpense(item.type)).reduce((sum, item) => sum + toNumber(item.amount), 0);
+  const calculationItems = items.filter((item) => !item.excludedFromTotals);
+  const income = calculationItems.filter((item) => isIncome(item.type)).reduce((sum, item) => sum + toNumber(item.amount), 0);
+  const expense = calculationItems.filter((item) => isExpense(item.type)).reduce((sum, item) => sum + toNumber(item.amount), 0);
   return { income, expense, balance: income - expense };
 }
 
@@ -76,7 +77,7 @@ export async function getFinancialInsights(userId: string, month: number, year: 
   const expenseVariation = percentageVariation(currentTotals.expense, previousTotals.expense);
   const monthlySavings = toNumber(savings._sum.amount ?? 0);
   const availableBalance = currentTotals.balance - toNumber(savedOut._sum.amount ?? 0);
-  const expenses = currentItems.filter((item) => isExpense(item.type));
+  const expenses = currentItems.filter((item) => !item.excludedFromTotals && isExpense(item.type));
   const overdueBills = expenses.filter((item) => currentStatus(item) === PaymentStatus.ATRASADO);
   const upcomingPendingBills = expenses.filter((item) => {
     if (!item.dueDate || currentStatus(item) !== PaymentStatus.PENDENTE) return false;

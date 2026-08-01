@@ -404,7 +404,7 @@ export async function getSavingsOverview(userId: string) {
     }),
     prisma.financialItem.findMany({
       where: { userId, month: currentMonth, year: currentYear },
-      select: { amount: true, type: true }
+      select: { amount: true, type: true, excludedFromTotals: true }
     }),
     prisma.savings.aggregate({
       where: { userId, month: currentMonth, year: currentYear, amount: { gt: 0 }, isInitialBalance: false },
@@ -454,10 +454,10 @@ export async function getSavingsOverview(userId: string) {
   }
 
   const monthlyIncome = monthItems
-    .filter((item) => incomeTypes().includes(item.type))
+    .filter((item) => !item.excludedFromTotals && incomeTypes().includes(item.type))
     .reduce((sum, item) => sum + toNumber(item.amount), 0);
   const monthlyExpense = monthItems
-    .filter((item) => expenseTypes().includes(item.type))
+    .filter((item) => !item.excludedFromTotals && expenseTypes().includes(item.type))
     .reduce((sum, item) => sum + toNumber(item.amount), 0);
   const monthlyPlannedSavings = toNumber(monthlySavings._sum.amount ?? 0);
   const monthlySavingsOpportunity = monthlyIncome - monthlyExpense - monthlyPlannedSavings;
@@ -612,15 +612,15 @@ export async function getSavingsSummary(userId: string, filters: SavingsSummaryI
     }),
     prisma.financialItem.findMany({
       where: { userId, month: filters.month, year: filters.year },
-      select: { amount: true, type: true }
+      select: { amount: true, type: true, excludedFromTotals: true }
     })
   ]);
 
   const monthlyIncome = monthItems
-    .filter((item) => incomeTypes().includes(item.type))
+    .filter((item) => !item.excludedFromTotals && incomeTypes().includes(item.type))
     .reduce((sum, item) => sum + toNumber(item.amount), 0);
   const monthlyExpense = monthItems
-    .filter((item) => expenseTypes().includes(item.type))
+    .filter((item) => !item.excludedFromTotals && expenseTypes().includes(item.type))
     .reduce((sum, item) => sum + toNumber(item.amount), 0);
   const balance = monthlyIncome - monthlyExpense;
   const monthlySavings = toNumber(monthSavings._sum.amount ?? 0);

@@ -29,8 +29,9 @@ function variation(current: number, previous: number) {
 }
 
 function summarize(items: Item[], savings: number, savingsOut: number) {
-  const income = items.filter((item) => isIncome(item.type)).reduce((sum, item) => sum + toNumber(item.amount), 0);
-  const expense = items.filter((item) => isExpense(item.type)).reduce((sum, item) => sum + toNumber(item.amount), 0);
+  const calculationItems = items.filter((item) => !item.excludedFromTotals);
+  const income = calculationItems.filter((item) => isIncome(item.type)).reduce((sum, item) => sum + toNumber(item.amount), 0);
+  const expense = calculationItems.filter((item) => isExpense(item.type)).reduce((sum, item) => sum + toNumber(item.amount), 0);
   return { income, expense, savings, balance: income - expense - savingsOut };
 }
 
