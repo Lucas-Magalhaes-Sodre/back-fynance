@@ -861,7 +861,11 @@ async function upsertCreditCardPaymentLink(userId: string, item: Item, input: Up
     title: item.name || item.title,
     description: input.description ?? item.description ?? `Planejado em ${item.category}`,
     amount: input.amount,
-    purchaseDate: input.date,
+    purchaseDate: dateForMonthlyOccurrence(
+      input.creditCardFirstInstallmentYear ?? item.year,
+      input.creditCardFirstInstallmentMonth ?? item.month,
+      input.date.getDate()
+    ),
     installments: input.creditCardInstallments ?? item.linkedCreditCardInstallments ?? 1
   };
   if (item.linkedCreditCardPurchaseId && item.linkedCreditCardId && item.linkedCreditCardId !== input.creditCardId) {
