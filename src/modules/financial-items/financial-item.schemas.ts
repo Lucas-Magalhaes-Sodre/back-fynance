@@ -69,7 +69,9 @@ export const updateFinancialItemValueSchema = z.object({
   description: z.string().optional().nullable(),
   paidWithCreditCard: z.coerce.boolean().optional(),
   creditCardId: z.string().uuid().optional().nullable(),
-  creditCardInstallments: z.coerce.number().int().min(1).max(240).optional().nullable()
+  creditCardInstallments: z.coerce.number().int().min(1).max(240).optional().nullable(),
+  creditCardFirstInstallmentMonth: z.coerce.number().int().min(1).max(12).optional().nullable(),
+  creditCardFirstInstallmentYear: z.coerce.number().int().min(1900).max(3000).optional().nullable()
 }).refine((data) => !data.paidWithCreditCard || data.scope === 'ONLY_THIS_PERIOD', {
   message: 'Pagamento via cartao so pode ser configurado para uma celula por vez',
   path: ['scope']
