@@ -10,6 +10,7 @@ import {
   listSavingsController,
   savingsSummaryController,
   savingsTransferController,
+  updateSavingsGroupController,
   updateSavingController
 } from './savings.controller.js';
 
@@ -23,6 +24,7 @@ export async function savingsRoutes(app: FastifyInstance) {
   app.get('/projection', savingsProjectionController);
   app.get('/summary', savingsSummaryController);
   app.post('/transfer', savingsTransferController);
+  app.put('/group', updateSavingsGroupController);
   app.delete('/group', deleteSavingsGroupController);
   app.put('/:id', updateSavingController);
   app.delete('/:id', deleteSavingController);

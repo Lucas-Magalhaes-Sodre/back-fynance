@@ -8,6 +8,7 @@ import {
   savingsProjectionSchema,
   savingsSummarySchema,
   savingsTransferSchema,
+  savingsUpdateGroupSchema,
   updateSavingSchema
 } from './savings.schemas.js';
 import {
@@ -20,7 +21,8 @@ import {
   getSavingsSummary,
   listSavings,
   transferSavings,
-  updateSaving
+  updateSaving,
+  updateSavingsGroup
 } from './savings.service.js';
 
 const idParamsSchema = z.object({ id: z.string().uuid() });
@@ -53,6 +55,12 @@ export async function deleteSavingController(request: FastifyRequest, reply: Fas
 export async function deleteSavingsGroupController(request: FastifyRequest, reply: FastifyReply) {
   const data = savingsDeleteGroupSchema.parse(request.query);
   const result = await deleteSavingsGroup(request.user.sub, data);
+  return reply.send(result);
+}
+
+export async function updateSavingsGroupController(request: FastifyRequest, reply: FastifyReply) {
+  const data = savingsUpdateGroupSchema.parse(request.body);
+  const result = await updateSavingsGroup(request.user.sub, data);
   return reply.send(result);
 }
 

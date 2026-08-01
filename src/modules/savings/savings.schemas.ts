@@ -44,6 +44,19 @@ export const savingsDeleteGroupSchema = z.object({
   title: z.string().min(1).optional()
 });
 
+export const savingsUpdateGroupSchema = z.object({
+  category: z.string().min(1),
+  title: z.string().min(1),
+  nextCategory: z.string().min(2).optional(),
+  nextTitle: z.string().min(2).optional(),
+  color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
+  description: z.string().optional().nullable(),
+  goalId: z.string().uuid().optional().nullable(),
+  hasYield: z.coerce.boolean().optional(),
+  yieldRateMonthly: z.coerce.number().min(0).max(100).optional().nullable(),
+  targetBalance: z.coerce.number().min(0).optional()
+});
+
 export const savingsSummarySchema = z.object({
   month: z.coerce.number().int().min(1).max(12),
   year: z.coerce.number().int().min(1900).max(3000)
@@ -83,6 +96,7 @@ export type CreateSavingInput = z.infer<typeof createSavingSchema>;
 export type UpdateSavingInput = z.infer<typeof updateSavingSchema>;
 export type ListSavingsInput = z.infer<typeof listSavingsSchema>;
 export type SavingsDeleteGroupInput = z.infer<typeof savingsDeleteGroupSchema>;
+export type SavingsUpdateGroupInput = z.infer<typeof savingsUpdateGroupSchema>;
 export type SavingsSummaryInput = z.infer<typeof savingsSummarySchema>;
 export type SavingsExtractInput = z.infer<typeof savingsExtractSchema>;
 export type SavingsProjectionInput = z.infer<typeof savingsProjectionSchema>;
