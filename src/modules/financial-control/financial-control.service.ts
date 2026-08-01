@@ -38,7 +38,12 @@ function currentStatus(item: Pick<Item, 'type' | 'dueDate' | 'paymentDate' | 'st
 }
 
 function serializeItem(item: Item) {
-  return { ...item, amount: toNumber(item.amount), status: currentStatus(item) };
+  return {
+    ...item,
+    amount: toNumber(item.amount),
+    linkedCreditCardAmount: item.linkedCreditCardAmount ? toNumber(item.linkedCreditCardAmount) : null,
+    status: currentStatus(item)
+  };
 }
 
 function serializeSaving(saving: SavingItem) {
@@ -101,14 +106,15 @@ function isExpense(type: FinancialItemType) {
 }
 
 function summarize(items: Item[], savings: SavingItem[] = []) {
-  const totalIncome = items.filter((item) => isIncome(item.type)).reduce((sum, item) => sum + toNumber(item.amount), 0);
-  const totalExpense = items.filter((item) => isExpense(item.type)).reduce((sum, item) => sum + toNumber(item.amount), 0);
+  const calculationItems = items.filter((item) => !item.excludedFromTotals);
+  const totalIncome = calculationItems.filter((item) => isIncome(item.type)).reduce((sum, item) => sum + toNumber(item.amount), 0);
+  const totalExpense = calculationItems.filter((item) => isExpense(item.type)).reduce((sum, item) => sum + toNumber(item.amount), 0);
   const totalSavings = savings.reduce((sum, saving) => sum + toNumber(saving.amount), 0);
   const savingsOut = savings.reduce((sum, saving) => {
     const amount = toNumber(saving.amount);
     return amount > 0 ? sum + amount : sum;
   }, 0);
-  const expenses = items.filter((item) => isExpense(item.type));
+  const expenses = calculationItems.filter((item) => isExpense(item.type));
   const paidExpenses = expenses.filter((item) => currentStatus(item) === PaymentStatus.PAGO);
   const overdueExpenses = expenses.filter((item) => currentStatus(item) === PaymentStatus.ATRASADO);
   const pendingExpenses = expenses.filter((item) => currentStatus(item) === PaymentStatus.PENDENTE);
@@ -183,9 +189,11 @@ function categoryRows(items: Item[], type: 'INCOME' | 'EXPENSE') {
     }
     const row = rowMap.get(category);
     if (!row) continue;
-    const amount = toNumber(item.amount);
-    row.months[item.month] += amount;
-    row.total += amount;
+    if (!item.excludedFromTotals) {
+      const amount = toNumber(item.amount);
+      row.months[item.month] += amount;
+      row.total += amount;
+    }
   }
 
   return Array.from(rowMap.values()).sort((a, b) => a.category.localeCompare(b.category, 'pt-BR'));

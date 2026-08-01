@@ -17,6 +17,11 @@ type CalendarItem = {
   isFixed: boolean;
   recurrenceType: RecurrenceType;
   recurrenceGroupId: string | null;
+  excludedFromTotals: boolean;
+  linkedCreditCardId: string | null;
+  linkedCreditCardPurchaseId: string | null;
+  linkedCreditCardInstallments: number | null;
+  linkedCreditCardAmount: Prisma.Decimal | null;
   date: Date;
   month: number;
   year: number;
@@ -71,7 +76,12 @@ function currentStatus(item: Pick<CalendarItem, 'type' | 'dueDate' | 'paymentDat
 }
 
 function serializeItem(item: CalendarItem) {
-  return { ...item, amount: toNumber(item.amount), status: currentStatus(item) };
+  return {
+    ...item,
+    amount: toNumber(item.amount),
+    linkedCreditCardAmount: item.linkedCreditCardAmount ? toNumber(item.linkedCreditCardAmount) : null,
+    status: currentStatus(item)
+  };
 }
 
 function serializeSaving(saving: CalendarSaving) {
@@ -99,13 +109,14 @@ export async function getFinancialCalendar(userId: string, month: number, year: 
     const date = new Date(Date.UTC(year, month - 1, index + 1));
     const key = dateKey(date);
     const dayItems = serializedItems.filter((item) => dateKey(item.date) === key);
+    const calculationItems = dayItems.filter((item) => !item.excludedFromTotals);
     const daySavings = serializedSavings.filter((saving) => dateKey(saving.date) === key);
-    const incomes = dayItems.filter((item) => isIncome(item.type)).reduce((sum, item) => sum + item.amount, 0);
-    const expenses = dayItems.filter((item) => isExpense(item.type)).reduce((sum, item) => sum + item.amount, 0);
+    const incomes = calculationItems.filter((item) => isIncome(item.type)).reduce((sum, item) => sum + item.amount, 0);
+    const expenses = calculationItems.filter((item) => isExpense(item.type)).reduce((sum, item) => sum + item.amount, 0);
     const savingTotal = daySavings.reduce((sum, saving) => sum + saving.amount, 0);
     const savedOut = daySavings.reduce((sum, saving) => (saving.amount > 0 ? sum + saving.amount : sum), 0);
-    const pendingBills = dayItems.filter((item) => isExpense(item.type) && item.status === PaymentStatus.PENDENTE);
-    const overdueBills = dayItems.filter((item) => isExpense(item.type) && item.status === PaymentStatus.ATRASADO);
+    const pendingBills = calculationItems.filter((item) => isExpense(item.type) && item.status === PaymentStatus.PENDENTE);
+    const overdueBills = calculationItems.filter((item) => isExpense(item.type) && item.status === PaymentStatus.ATRASADO);
 
     return {
       date: key,

@@ -66,7 +66,19 @@ export const updateFinancialItemValueSchema = z.object({
   scope: valueUpdateScopeSchema,
   periodType: periodTypeSchema,
   endMonth: z.coerce.number().int().min(1).max(12).optional(),
-  description: z.string().optional().nullable()
+  description: z.string().optional().nullable(),
+  paidWithCreditCard: z.coerce.boolean().optional(),
+  creditCardId: z.string().uuid().optional().nullable(),
+  creditCardInstallments: z.coerce.number().int().min(1).max(240).optional().nullable()
+}).refine((data) => !data.paidWithCreditCard || data.scope === 'ONLY_THIS_PERIOD', {
+  message: 'Pagamento via cartao so pode ser configurado para uma celula por vez',
+  path: ['scope']
+}).refine((data) => !data.paidWithCreditCard || Boolean(data.creditCardId), {
+  message: 'Informe o cartao usado no pagamento',
+  path: ['creditCardId']
+}).refine((data) => !data.paidWithCreditCard || data.amount > 0, {
+  message: 'Informe um valor maior que zero para pagar no cartao',
+  path: ['amount']
 });
 
 export const createFinancialItemSchema = financialItemBaseSchema.refine((data) => data.title || data.name, {

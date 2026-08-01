@@ -1,6 +1,11 @@
 import { FinancialItemType, PaymentStatus, Prisma, RecurrenceType } from '@prisma/client';
 import { prisma } from '../../shared/prisma.js';
 import { SAVINGS_REDEMPTION_INCOME_CATEGORY } from '../../shared/system-categories.js';
+import {
+  createCreditCardPurchase,
+  deleteCreditCardPurchase,
+  updateCreditCardPurchase
+} from '../credit-cards/credit-card.service.js';
 import type {
   BulkDeleteFinancialScopeInput,
   CreateFinancialItemInput,
@@ -14,6 +19,8 @@ import type {
   UpdateFinancialItemValueInput,
   UpdateFinancialItemInput
 } from './financial-item.schemas.js';
+
+type Item = Awaited<ReturnType<typeof prisma.financialItem.findMany>>[number];
 
 const salarySearchTerms = [
   'salario',
@@ -46,13 +53,23 @@ function serializeItem(item: {
   isFixed: boolean;
   recurrenceType: RecurrenceType;
   recurrenceGroupId: string | null;
+  excludedFromTotals: boolean;
+  linkedCreditCardId: string | null;
+  linkedCreditCardPurchaseId: string | null;
+  linkedCreditCardInstallments: number | null;
+  linkedCreditCardAmount: Prisma.Decimal | null;
   date: Date;
   month: number;
   year: number;
   createdAt: Date;
   updatedAt: Date;
 }) {
-  return { ...item, amount: toNumber(item.amount), status: currentStatus(item) };
+  return {
+    ...item,
+    amount: toNumber(item.amount),
+    linkedCreditCardAmount: item.linkedCreditCardAmount ? toNumber(item.linkedCreditCardAmount) : null,
+    status: currentStatus(item)
+  };
 }
 
 function normalizeType(type: CreateFinancialItemInput['type'] | UpdateFinancialItemInput['type']) {
@@ -736,6 +753,7 @@ export async function getDashboard(userId: string) {
   };
 
   for (const item of items) {
+    if (item.excludedFromTotals) continue;
     const amount = toNumber(item.amount);
     if (!isExpenseType(item.type)) totals.totalIncomes += amount;
     if (isExpenseType(item.type)) totals.totalExpenses += amount;
@@ -771,6 +789,7 @@ export async function getPaymentSummary(userId: string, filters: PaymentSummaryI
   };
 
   for (const item of items) {
+    if (item.excludedFromTotals) continue;
     const amount = toNumber(item.amount);
     const status = currentStatus(item);
 
@@ -797,6 +816,78 @@ export async function getPaymentSummary(userId: string, filters: PaymentSummaryI
   return summary;
 }
 
+async function clearCreditCardPaymentLink(userId: string, item: Item) {
+  if (!item.linkedCreditCardPurchaseId) {
+    return {
+      excludedFromTotals: false,
+      linkedCreditCardId: null,
+      linkedCreditCardPurchaseId: null,
+      linkedCreditCardInstallments: null,
+      linkedCreditCardAmount: null
+    };
+  }
+
+  try {
+    await deleteCreditCardPurchase(userId, item.linkedCreditCardPurchaseId, { deleteAllInstallments: true });
+  } catch (error) {
+    const statusCode = (error as { statusCode?: number })?.statusCode;
+    if (statusCode !== 404) {
+      throw error;
+    }
+  }
+
+  return {
+    excludedFromTotals: false,
+    linkedCreditCardId: null,
+    linkedCreditCardPurchaseId: null,
+    linkedCreditCardInstallments: null,
+    linkedCreditCardAmount: null
+  };
+}
+
+async function upsertCreditCardPaymentLink(userId: string, item: Item, input: UpdateFinancialItemValueInput) {
+  if (item.type !== FinancialItemType.EXPENSE) {
+    const error = new Error('Somente despesas podem ser pagas via cartao') as Error & { statusCode: number };
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!input.creditCardId) {
+    const error = new Error('Informe o cartao usado no pagamento') as Error & { statusCode: number };
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const purchasePayload = {
+    title: item.name || item.title,
+    description: input.description ?? item.description ?? `Planejado em ${item.category}`,
+    amount: input.amount,
+    purchaseDate: input.date,
+    installments: input.creditCardInstallments ?? item.linkedCreditCardInstallments ?? 1
+  };
+  if (item.linkedCreditCardPurchaseId && item.linkedCreditCardId && item.linkedCreditCardId !== input.creditCardId) {
+    await clearCreditCardPaymentLink(userId, item);
+  }
+
+  const shouldUpdatePurchase =
+    Boolean(item.linkedCreditCardPurchaseId) &&
+    (!item.linkedCreditCardId || item.linkedCreditCardId === input.creditCardId);
+  const purchase = shouldUpdatePurchase && item.linkedCreditCardPurchaseId
+    ? await updateCreditCardPurchase(userId, item.linkedCreditCardPurchaseId, purchasePayload)
+    : await createCreditCardPurchase(userId, {
+        cardId: input.creditCardId,
+        ...purchasePayload
+      });
+
+  return {
+    excludedFromTotals: true,
+    linkedCreditCardId: input.creditCardId,
+    linkedCreditCardPurchaseId: purchase.id,
+    linkedCreditCardInstallments: purchase.installments,
+    linkedCreditCardAmount: input.amount,
+    status: PaymentStatus.PAGO
+  };
+}
+
 export async function updateFinancialItemValue(userId: string, id: string, input: UpdateFinancialItemValueInput) {
   const existing = await prisma.financialItem.findFirst({ where: { id, userId } });
   if (!existing) {
@@ -809,9 +900,16 @@ export async function updateFinancialItemValue(userId: string, id: string, input
     category: existing.category
   });
 
+  const creditCardLinkData = input.paidWithCreditCard === true
+    ? await upsertCreditCardPaymentLink(userId, existing, input)
+    : input.paidWithCreditCard === false
+      ? await clearCreditCardPaymentLink(userId, existing)
+      : {};
+
   const updateData = {
     amount: input.amount,
-    description: input.description ?? existing.description
+    description: input.description ?? existing.description,
+    ...creditCardLinkData
   };
 
   if (input.scope === 'ONLY_THIS_PERIOD') {
@@ -914,10 +1012,11 @@ export async function updateFinancialItemValue(userId: string, id: string, input
   const monthItems = yearItems.filter((item) => item.month === existing.month);
 
   const summarize = (items: typeof yearItems) => {
-    const totalIncome = items
+    const calculationItems = items.filter((item) => !item.excludedFromTotals);
+    const totalIncome = calculationItems
       .filter((item) => item.type === FinancialItemType.INCOME)
       .reduce((sum, item) => sum + toNumber(item.amount), 0);
-    const totalExpense = items
+    const totalExpense = calculationItems
       .filter((item) => item.type === FinancialItemType.EXPENSE)
       .reduce((sum, item) => sum + toNumber(item.amount), 0);
     return { totalIncome, totalExpense, balance: totalIncome - totalExpense };
