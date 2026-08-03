@@ -186,6 +186,12 @@ export async function loginWithGoogle(app: FastifyInstance, input: GoogleLoginIn
   const ticket = await client.verifyIdToken({
     idToken: input.idToken,
     audience: env.GOOGLE_CLIENT_ID
+  }).catch(() => {
+    const error = new Error('Login com Google invalido. Confira se o Client ID do front e do backend e o mesmo.') as Error & {
+      statusCode: number;
+    };
+    error.statusCode = 401;
+    throw error;
   });
   const payload = ticket.getPayload();
   const email = payload?.email;
