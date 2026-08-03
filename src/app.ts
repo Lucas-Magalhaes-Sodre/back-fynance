@@ -18,12 +18,13 @@ import { financialItemRoutes } from './modules/financial-items/financial-item.ro
 import { financialReminderRoutes } from './modules/financial-reminders/financial-reminder.routes.js';
 import { privacyRoutes } from './modules/privacy/privacy.routes.js';
 import { pushNotificationRoutes } from './modules/push-notifications/push-notification.routes.js';
+import { referralRoutes } from './modules/referrals/referral.routes.js';
 import { savingsRoutes } from './modules/savings/savings.routes.js';
 import { userRoutes } from './modules/users/user.routes.js';
 import { env } from './shared/env.js';
 
 export function buildApp() {
-  const app = fastify({ logger: true });
+  const app = fastify({ logger: true, bodyLimit: 3 * 1024 * 1024 });
   const allowedOrigins = env.WEB_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean);
   const localDevOriginPattern = /^http:\/\/(localhost|127\.0\.0\.1|\d{1,3}(?:\.\d{1,3}){3}):(5173|5174|5175|19006|8081)$/;
 
@@ -72,6 +73,7 @@ export function buildApp() {
   app.register(adminRoutes, { prefix: '/admin' });
   app.register(privacyRoutes, { prefix: '/privacy' });
   app.register(pushNotificationRoutes, { prefix: '/push-notifications' });
+  app.register(referralRoutes, { prefix: '/referrals' });
   app.register(userRoutes, { prefix: '/users' });
   app.register(creditCardRoutes, { prefix: '/credit-cards' });
   app.register(financialItemRoutes, { prefix: '/financial-items' });

@@ -5,6 +5,7 @@ export const checkoutSchema = z.object({
   planId: z.string().min(1).optional(),
   plan: z.enum(['MONTHLY', 'YEARLY']).optional(),
   couponCode: z.string().trim().max(40).optional(),
+  useReferralCredit: z.boolean().optional().default(false),
   legalAccepted: z.literal(true)
 });
 

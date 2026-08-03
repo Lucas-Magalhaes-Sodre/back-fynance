@@ -5,6 +5,7 @@ import { env } from '../../shared/env.js';
 import { CANCELLATION_VERSION, PRIVACY_VERSION, TERMS_VERSION } from '../../shared/legal.js';
 import { normalizePlanIncludedItems, normalizePlanProductKeys, normalizePlanProductLabels } from '../../shared/plan-products.js';
 import { prisma } from '../../shared/prisma.js';
+import { applyReferralCreditDiscount, calculateReferralCommission, resolveAnyCoupon } from '../referrals/referral.service.js';
 import { accessInfo } from './access.service.js';
 import type { CheckoutInput, CouponValidationInput } from './billing.schemas.js';
 
@@ -42,10 +43,6 @@ function legacyPlanCode(durationMonths: number): SubscriptionPlan {
   return 'MONTHLY';
 }
 
-function normalizeCouponCode(code?: string | null) {
-  return (code ?? '').trim().toUpperCase();
-}
-
 function applyDiscount(price: number, coupon: { discountType: 'PERCENT' | 'FIXED'; discountValue: unknown }) {
   const discountValue = Number(coupon.discountValue);
   const discount = coupon.discountType === 'PERCENT' ? price * (discountValue / 100) : discountValue;
@@ -79,6 +76,12 @@ function parseMercadoPagoSignature(signatureHeader: string | undefined) {
     if (key && value) acc[key] = value;
     return acc;
   }, {});
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
 }
 
 function assertMercadoPagoWebhookSignature(input: {
@@ -162,28 +165,6 @@ export async function listPublicBillingPlans() {
   return plans.map(publicPlan);
 }
 
-async function resolveCoupon(planId: string, couponCode?: string | null) {
-  const code = normalizeCouponCode(couponCode);
-  if (!code) return null;
-
-  const now = new Date();
-  const coupon = await prisma.billingCoupon.findUnique({ where: { code } });
-  if (
-    !coupon ||
-    !coupon.active ||
-    (coupon.startsAt && coupon.startsAt > now) ||
-    (coupon.expiresAt && coupon.expiresAt < now) ||
-    (coupon.usageLimit !== null && coupon.usedCount >= coupon.usageLimit) ||
-    (coupon.billingPlanId && coupon.billingPlanId !== planId)
-  ) {
-    const error = new Error('Cupom invalido ou indisponivel para este plano') as Error & { statusCode: number };
-    error.statusCode = 400;
-    throw error;
-  }
-
-  return coupon;
-}
-
 export async function validateBillingCoupon(input: CouponValidationInput) {
   const plan = await prisma.billingPlan.findFirst({ where: { id: input.planId, active: true } });
   if (!plan) {
@@ -192,7 +173,7 @@ export async function validateBillingCoupon(input: CouponValidationInput) {
     throw error;
   }
 
-  const coupon = await resolveCoupon(plan.id, input.couponCode);
+  const coupon = await resolveAnyCoupon(plan.id, input.couponCode);
   if (!coupon) {
     const error = new Error('Informe um cupom') as Error & { statusCode: number };
     error.statusCode = 400;
@@ -206,6 +187,7 @@ export async function validateBillingCoupon(input: CouponValidationInput) {
     description: coupon.description,
     discountType: coupon.discountType,
     discountValue: Number(coupon.discountValue),
+    kind: coupon.kind,
     originalPrice: price,
     ...discount
   };
@@ -286,10 +268,62 @@ export async function createCheckout(
   }
 
   const plan = await resolveCheckoutPlan(input);
-  const coupon = await resolveCoupon(plan.id, input.couponCode);
+  const coupon = await resolveAnyCoupon(plan.id, input.couponCode, user.id);
   const originalPrice = Number(plan.price);
-  const discount = coupon ? applyDiscount(originalPrice, coupon) : { discountAmount: 0, finalPrice: originalPrice };
+  const couponDiscount = coupon ? applyDiscount(originalPrice, coupon) : { discountAmount: 0, finalPrice: originalPrice };
+  const checkoutReference = `checkout-${user.id}-${plan.id}-${Date.now()}`;
+  const referralCredit = input.useReferralCredit
+    ? await applyReferralCreditDiscount(user.id, checkoutReference, couponDiscount.finalPrice)
+    : { amount: 0 };
+  const discount = {
+    discountAmount: Number((couponDiscount.discountAmount + referralCredit.amount).toFixed(2)),
+    finalPrice: Number(Math.max(0, couponDiscount.finalPrice - referralCredit.amount).toFixed(2))
+  };
   const legacyCode = legacyPlanCode(plan.durationMonths);
+  if (discount.finalPrice <= 0) {
+    const periodEnd = addDays(new Date(), Math.max(1, plan.durationMonths) * 31);
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        paymentProvider: 'NONE',
+        providerSubscriptionId: null,
+        subscriptionStatus: 'ACTIVE',
+        subscriptionPlan: legacyCode,
+        billingPlanId: plan.id,
+        planNameSnapshot: plan.name,
+        planPriceSnapshot: 0,
+        planDurationMonthsSnapshot: plan.durationMonths,
+        planProductKeysSnapshot: normalizePlanProductKeys(plan.productKeys),
+        planProductLabelsSnapshot: normalizePlanProductLabels(plan.productLabels),
+        planIncludedItemsSnapshot: normalizePlanIncludedItems(plan.includedItems),
+        couponCodeSnapshot: coupon?.code,
+        couponDiscountSnapshot: discount.discountAmount,
+        subscriptionCurrentPeriodEnd: periodEnd,
+        lastPaymentAt: new Date(),
+        accessBlockedAt: null
+      }
+    });
+    await recordSubscriptionTermsAcceptance({
+      userId: user.id,
+      plan,
+      originalPrice,
+      discount,
+      couponCode: coupon?.code,
+      provider: 'NONE',
+      metadata
+    });
+    return {
+      provider: input.provider,
+      planId: plan.id,
+      planName: plan.name,
+      originalPrice,
+      discountAmount: discount.discountAmount,
+      finalPrice: discount.finalPrice,
+      couponCode: coupon?.code ?? null,
+      referralCreditAmount: referralCredit.amount,
+      url: `${env.WEB_ORIGIN}/app/billing`
+    };
+  }
   const configuredPlanUrl =
     legacyCode === 'MONTHLY' ? env.MERCADO_PAGO_MONTHLY_PLAN_URL : legacyCode === 'YEARLY' ? env.MERCADO_PAGO_YEARLY_PLAN_URL : undefined;
   if (configuredPlanUrl && !env.MERCADO_PAGO_ACCESS_TOKEN) {
@@ -319,8 +353,8 @@ export async function createCheckout(
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      reason: `Deluket Finance - ${plan.name}${coupon ? ` - cupom ${coupon.code}` : ''}`,
-      external_reference: `${user.id}:${plan.id}:${coupon?.id ?? ''}`,
+      reason: `Deluket Finance - ${plan.name}${coupon ? ` - cupom ${coupon.code}` : ''}${referralCredit.amount ? ' - credito de indicacao' : ''}`,
+      external_reference: `${user.id}:${plan.id}:${coupon?.kind ?? ''}:${coupon?.id ?? ''}`,
       payer_email: user.email,
       back_url: `${env.WEB_ORIGIN}/app/billing`,
       auto_recurring: {
@@ -369,7 +403,9 @@ export async function createCheckout(
   });
 
   if (coupon) {
-    await prisma.billingCoupon.update({ where: { id: coupon.id }, data: { usedCount: { increment: 1 } } });
+    if (coupon.kind === 'PROMOTIONAL') {
+      await prisma.billingCoupon.update({ where: { id: coupon.id }, data: { usedCount: { increment: 1 } } });
+    }
   }
 
   return {
@@ -380,6 +416,7 @@ export async function createCheckout(
     discountAmount: discount.discountAmount,
     finalPrice: discount.finalPrice,
     couponCode: coupon?.code ?? null,
+    referralCreditAmount: referralCredit.amount,
     url: data.init_point
   };
 }
@@ -409,7 +446,7 @@ export async function processMercadoPagoWebhook(payload: unknown, query: Record<
     providerPayload = await mercadoPagoGet(`/v1/payments/${providerEventId}`);
   }
 
-  await prisma.subscriptionEvent.create({
+  const subscriptionEvent = await prisma.subscriptionEvent.create({
     data: {
       userId: null,
       provider: 'MERCADO_PAGO',
@@ -422,7 +459,9 @@ export async function processMercadoPagoWebhook(payload: unknown, query: Record<
   if (!providerPayload) return { ok: true, ignored: true };
 
   const externalReference = String(providerPayload.external_reference ?? '');
-  const [externalUserId, externalPlanId, externalCouponId] = externalReference.split(':');
+  const [externalUserId, externalPlanId, externalCouponKindOrId, externalCouponIdMaybe] = externalReference.split(':');
+  const externalCouponKind = externalCouponIdMaybe ? externalCouponKindOrId : 'PROMOTIONAL';
+  const externalCouponId = externalCouponIdMaybe ?? externalCouponKindOrId;
   const providerSubscriptionId = String(providerPayload?.id ?? providerEventId ?? '');
   const userId = externalUserId || null;
 
@@ -443,7 +482,11 @@ export async function processMercadoPagoWebhook(payload: unknown, query: Record<
   const status = subscriptionStatusFromMercadoPago(providerPayload?.status);
   const approvedPayment = providerPayload?.status === 'approved';
   const plan = externalPlanId ? await prisma.billingPlan.findUnique({ where: { id: externalPlanId } }) : null;
-  const coupon = externalCouponId ? await prisma.billingCoupon.findUnique({ where: { id: externalCouponId } }) : null;
+  const coupon = externalCouponId
+    ? externalCouponKind === 'REFERRAL'
+      ? await prisma.referralCoupon.findUnique({ where: { id: externalCouponId } })
+      : await prisma.billingCoupon.findUnique({ where: { id: externalCouponId } })
+    : null;
   const durationMonths = plan?.durationMonths ?? providerPayload?.auto_recurring?.frequency ?? 1;
   const providerAmount = providerPayload?.auto_recurring?.transaction_amount ?? providerPayload?.transaction_amount;
   const finalPrice = providerAmount !== undefined ? Number(providerAmount) : plan ? Number(plan.price) : undefined;
@@ -469,6 +512,38 @@ export async function processMercadoPagoWebhook(payload: unknown, query: Record<
       accessBlockedAt: approvedPayment || status === 'ACTIVE' ? null : undefined
     }
   }).catch(() => null);
+
+  if (approvedPayment && plan && coupon && externalCouponKind === 'REFERRAL' && 'userId' in coupon && coupon.userId !== userId) {
+    const amount = calculateReferralCommission({
+      coupon,
+      planId: plan.id,
+      baseAmount: finalPrice ?? Number(plan.price)
+    });
+    const existingCommission = await prisma.referralCommission.findFirst({
+      where: {
+        referralCouponId: coupon.id,
+        referredUserId: userId,
+        billingPlanId: plan.id
+      },
+      select: { id: true }
+    });
+    if (existingCommission) return { ok: true };
+
+    await prisma.referralCommission.create({
+      data: {
+        referralCouponId: coupon.id,
+        referrerUserId: coupon.userId,
+        referredUserId: userId,
+        billingPlanId: plan.id,
+        subscriptionEventId: subscriptionEvent.id,
+        baseAmount: finalPrice ?? Number(plan.price),
+        amount,
+        availableAt: addDays(new Date(), 14),
+        status: 'PENDING',
+        notes: `Comissao gerada por assinatura ${plan.name}`
+      }
+    }).catch(() => null);
+  }
 
   return { ok: true };
 }

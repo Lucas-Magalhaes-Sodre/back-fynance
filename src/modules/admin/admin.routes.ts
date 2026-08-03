@@ -5,6 +5,8 @@ import {
   anonymizeAdminUserController,
   createAdminBillingCouponController,
   createAdminBillingPlanController,
+  createAdminMarketingBannerController,
+  deleteAdminMarketingBannerController,
   deactivateAdminBillingCouponController,
   deactivateAdminBillingPlanController,
   getAppSettingsController,
@@ -12,12 +14,21 @@ import {
   listAdminAuditLogsController,
   listAdminBillingCouponsController,
   listAdminBillingPlansController,
+  listAdminMarketingBannersController,
+  listAdminReferralCommissionsController,
+  listAdminReferralCouponsController,
+  listAdminReferralWithdrawalsController,
   listAdminUsersController,
   listSubscriptionEventsController,
   reorderAdminBillingPlansController,
+  reorderAdminMarketingBannersController,
   updateAppSettingsController,
   updateAdminBillingCouponController,
   updateAdminBillingPlanController,
+  updateAdminMarketingBannerController,
+  updateAdminReferralCommissionController,
+  updateAdminReferralCouponController,
+  updateAdminReferralWithdrawalController,
   updateAdminUserSubscriptionController
 } from './admin.controller.js';
 import { assertAdmin } from './admin.service.js';
@@ -43,6 +54,17 @@ export async function adminRoutes(app: FastifyInstance) {
   app.post('/subscriptions/coupons', createAdminBillingCouponController);
   app.put('/subscriptions/coupons/:couponId', updateAdminBillingCouponController);
   app.delete('/subscriptions/coupons/:couponId', deactivateAdminBillingCouponController);
+  app.get('/referrals/coupons', listAdminReferralCouponsController);
+  app.put('/referrals/coupons/:couponId', updateAdminReferralCouponController);
+  app.get('/referrals/commissions', listAdminReferralCommissionsController);
+  app.put('/referrals/commissions/:commissionId', updateAdminReferralCommissionController);
+  app.get('/referrals/withdrawals', listAdminReferralWithdrawalsController);
+  app.put('/referrals/withdrawals/:withdrawalId', updateAdminReferralWithdrawalController);
+  app.get('/marketing-banners', listAdminMarketingBannersController);
+  app.post('/marketing-banners', createAdminMarketingBannerController);
+  app.put('/marketing-banners/order', reorderAdminMarketingBannersController);
+  app.put('/marketing-banners/:bannerId', updateAdminMarketingBannerController);
+  app.delete('/marketing-banners/:bannerId', deleteAdminMarketingBannerController);
   app.get('/settings', getAppSettingsController);
   app.put('/settings', updateAppSettingsController);
   app.patch('/subscriptions/users/:userId', updateAdminUserSubscriptionController);

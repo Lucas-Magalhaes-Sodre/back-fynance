@@ -6,6 +6,7 @@ import { env } from '../../shared/env.js';
 import { COOKIES_VERSION, LGPD_CONSENT_VERSION, PRIVACY_VERSION, TERMS_VERSION } from '../../shared/legal.js';
 import { accessInfo, roleForEmail, trialEndDateWithDays } from '../billing/access.service.js';
 import { getDefaultTrialDays } from '../admin/admin.service.js';
+import { ensureReferralCoupon } from '../referrals/referral.service.js';
 import type { ForgotPasswordInput, GoogleLoginInput, LoginInput, RegisterInput } from './auth.schemas.js';
 
 function sanitizeUser(user: {
@@ -51,6 +52,7 @@ function sanitizeUser(user: {
     trialEndsAt: user.trialEndsAt ?? null,
     manualAccessUntil: user.manualAccessUntil ?? null,
     accessBlockedAt: user.accessBlockedAt ?? null,
+    subscriptionPlan: user.subscriptionPlan ?? 'FREE',
     subscriptionCurrentPeriodEnd: user.subscriptionCurrentPeriodEnd ?? null,
     planProductKeysSnapshot: user.planProductKeysSnapshot ?? null
   });
@@ -148,6 +150,7 @@ export async function registerUser(app: FastifyInstance, input: RegisterInput) {
       trialEndsAt: trialEndDateWithDays(defaultTrialDays)
     }
   });
+  await ensureReferralCoupon(user.id).catch(() => null);
 
   const token = app.jwt.sign({ sub: user.id, email: user.email }, { expiresIn: '7d' });
   return { user: sanitizeUser(user), token };
@@ -229,6 +232,7 @@ export async function loginWithGoogle(app: FastifyInstance, input: GoogleLoginIn
         : { trialEndsAt: trialEndDateWithDays(defaultTrialDays) })
     }
   });
+  await ensureReferralCoupon(user.id).catch(() => null);
 
   const token = app.jwt.sign({ sub: user.id, email: user.email }, { expiresIn: '7d' });
   return { user: sanitizeUser(user), token };

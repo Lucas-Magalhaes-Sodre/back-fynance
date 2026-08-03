@@ -1,6 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { adminUpdateSubscriptionSchema, anonymizeUserSchema, appSettingsSchema, billingCouponSchema, billingPlanOrderSchema, billingPlanSchema, grantTrialSchema } from './admin.schemas.js';
+import { adminReferralCommissionSchema, adminReferralCouponSchema, adminReferralWithdrawalSchema, adminUpdateSubscriptionSchema, anonymizeUserSchema, appSettingsSchema, billingCouponSchema, billingPlanOrderSchema, billingPlanSchema, grantTrialSchema, marketingBannerOrderSchema, marketingBannerSchema } from './admin.schemas.js';
 import {
   anonymizeAdminUser,
   assertCanDemoteAdmin,
@@ -15,18 +15,33 @@ import {
   listAdminAuditLogs,
   listAdminBillingCoupons,
   listAdminBillingPlans,
+  listAdminMarketingBanners,
+  listAdminReferralCommissions,
+  listAdminReferralCoupons,
+  listAdminReferralWithdrawals,
   listAdminUsers,
   listSubscriptionEvents,
   reorderAdminBillingPlans,
+  reorderAdminMarketingBanners,
+  createAdminMarketingBanner,
+  deleteAdminMarketingBanner,
   updateAppSettings,
   updateAdminBillingCoupon,
   updateAdminBillingPlan,
+  updateAdminMarketingBanner,
+  updateAdminReferralCommission,
+  updateAdminReferralCoupon,
+  updateAdminReferralWithdrawal,
   updateAdminUserSubscription
 } from './admin.service.js';
 
 const userParamsSchema = z.object({ userId: z.string().uuid() });
 const planParamsSchema = z.object({ planId: z.string().min(1) });
 const couponParamsSchema = z.object({ couponId: z.string().uuid() });
+const referralCouponParamsSchema = z.object({ couponId: z.string().uuid() });
+const referralCommissionParamsSchema = z.object({ commissionId: z.string().uuid() });
+const referralWithdrawalParamsSchema = z.object({ withdrawalId: z.string().uuid() });
+const bannerParamsSchema = z.object({ bannerId: z.string().uuid() });
 const eventsQuerySchema = z.object({ userId: z.string().uuid().optional() });
 const usersQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -231,4 +246,117 @@ export async function deactivateAdminBillingCouponController(request: FastifyReq
     targetId: couponId
   });
   return reply.send({ coupon });
+}
+
+export async function listAdminReferralCouponsController(_request: FastifyRequest, reply: FastifyReply) {
+  const coupons = await listAdminReferralCoupons();
+  return reply.send({ coupons });
+}
+
+export async function updateAdminReferralCouponController(request: FastifyRequest, reply: FastifyReply) {
+  const { couponId } = referralCouponParamsSchema.parse(request.params);
+  const data = adminReferralCouponSchema.parse(request.body);
+  const coupon = await updateAdminReferralCoupon(couponId, data);
+  await createAdminAuditLog({
+    actorUserId: request.user.sub,
+    action: 'ADMIN_REFERRAL_COUPON_UPDATE',
+    targetType: 'REFERRAL_COUPON',
+    targetId: couponId,
+    payload: data
+  });
+  return reply.send({ coupon });
+}
+
+export async function listAdminReferralCommissionsController(_request: FastifyRequest, reply: FastifyReply) {
+  const commissions = await listAdminReferralCommissions();
+  return reply.send({ commissions });
+}
+
+export async function updateAdminReferralCommissionController(request: FastifyRequest, reply: FastifyReply) {
+  const { commissionId } = referralCommissionParamsSchema.parse(request.params);
+  const data = adminReferralCommissionSchema.parse(request.body);
+  const commission = await updateAdminReferralCommission(commissionId, data);
+  await createAdminAuditLog({
+    actorUserId: request.user.sub,
+    action: 'ADMIN_REFERRAL_COMMISSION_UPDATE',
+    targetType: 'REFERRAL_COMMISSION',
+    targetId: commissionId,
+    payload: data
+  });
+  return reply.send({ commission });
+}
+
+export async function listAdminReferralWithdrawalsController(_request: FastifyRequest, reply: FastifyReply) {
+  const withdrawals = await listAdminReferralWithdrawals();
+  return reply.send({ withdrawals });
+}
+
+export async function updateAdminReferralWithdrawalController(request: FastifyRequest, reply: FastifyReply) {
+  const { withdrawalId } = referralWithdrawalParamsSchema.parse(request.params);
+  const data = adminReferralWithdrawalSchema.parse(request.body);
+  const withdrawal = await updateAdminReferralWithdrawal(withdrawalId, data);
+  await createAdminAuditLog({
+    actorUserId: request.user.sub,
+    action: 'ADMIN_REFERRAL_WITHDRAWAL_UPDATE',
+    targetType: 'REFERRAL_WITHDRAWAL',
+    targetId: withdrawalId,
+    payload: data
+  });
+  return reply.send({ withdrawal });
+}
+
+export async function listAdminMarketingBannersController(_request: FastifyRequest, reply: FastifyReply) {
+  const banners = await listAdminMarketingBanners();
+  return reply.send({ banners });
+}
+
+export async function createAdminMarketingBannerController(request: FastifyRequest, reply: FastifyReply) {
+  const data = marketingBannerSchema.parse(request.body);
+  const banner = await createAdminMarketingBanner(data);
+  await createAdminAuditLog({
+    actorUserId: request.user.sub,
+    action: 'ADMIN_MARKETING_BANNER_CREATE',
+    targetType: 'MARKETING_BANNER',
+    targetId: banner.id,
+    payload: data
+  });
+  return reply.status(201).send({ banner });
+}
+
+export async function updateAdminMarketingBannerController(request: FastifyRequest, reply: FastifyReply) {
+  const { bannerId } = bannerParamsSchema.parse(request.params);
+  const data = marketingBannerSchema.parse(request.body);
+  const banner = await updateAdminMarketingBanner(bannerId, data);
+  await createAdminAuditLog({
+    actorUserId: request.user.sub,
+    action: 'ADMIN_MARKETING_BANNER_UPDATE',
+    targetType: 'MARKETING_BANNER',
+    targetId: bannerId,
+    payload: data
+  });
+  return reply.send({ banner });
+}
+
+export async function reorderAdminMarketingBannersController(request: FastifyRequest, reply: FastifyReply) {
+  const data = marketingBannerOrderSchema.parse(request.body);
+  const banners = await reorderAdminMarketingBanners(data);
+  await createAdminAuditLog({
+    actorUserId: request.user.sub,
+    action: 'ADMIN_MARKETING_BANNER_REORDER',
+    targetType: 'MARKETING_BANNER',
+    payload: data
+  });
+  return reply.send({ banners });
+}
+
+export async function deleteAdminMarketingBannerController(request: FastifyRequest, reply: FastifyReply) {
+  const { bannerId } = bannerParamsSchema.parse(request.params);
+  const banner = await deleteAdminMarketingBanner(bannerId);
+  await createAdminAuditLog({
+    actorUserId: request.user.sub,
+    action: 'ADMIN_MARKETING_BANNER_DELETE',
+    targetType: 'MARKETING_BANNER',
+    targetId: bannerId
+  });
+  return reply.send({ banner });
 }

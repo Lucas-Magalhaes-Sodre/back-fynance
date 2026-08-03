@@ -251,6 +251,94 @@ function dateForMonthlyOccurrence(year: number, month: number, day: number) {
   return new Date(year, month - 1, safeDay);
 }
 
+function startOfDay(value: Date) {
+  const date = new Date(value);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function addDays(value: Date, days: number) {
+  const date = new Date(value);
+  date.setDate(date.getDate() + days);
+  return date;
+}
+
+function addYearsClamped(value: Date, years: number) {
+  const year = value.getFullYear() + years;
+  const month = value.getMonth() + 1;
+  const day = value.getDate();
+  return dateForMonthlyOccurrence(year, month, day);
+}
+
+function jsWeekdayToFormWeekday(value: Date) {
+  const day = value.getDay();
+  return day === 0 ? 7 : day;
+}
+
+function recurringDatesForInput(input: CreateFinancialItemInput) {
+  if (!input.recurrenceType || input.recurrenceType === RecurrenceType.NONE || !input.recurrenceGeneration) return [];
+
+  const generation = input.recurrenceGeneration;
+  const maxOccurrences = 15_000;
+
+  if (input.recurrenceType === RecurrenceType.MONTHLY) {
+    const startMonth = generation.mode === 'ALL_YEAR' ? 1 : generation.startMonth;
+    const startYear = generation.startYear;
+    const endMonth = generation.endMonth;
+    const endYear = generation.endYear;
+    const startCursor = monthCursor(startYear, startMonth);
+    const endCursor = monthCursor(endYear, endMonth);
+    const dueDay = input.dueDay ?? input.date.getDate();
+
+    if (endCursor < startCursor) {
+      const error = new Error('Periodo final da recorrencia anterior ao periodo inicial') as Error & { statusCode: number };
+      error.statusCode = 400;
+      throw error;
+    }
+
+    return Array.from({ length: endCursor - startCursor + 1 }, (_, index) => {
+      const cursor = startCursor + index;
+      const occurrenceYear = Math.floor((cursor - 1) / 12);
+      const occurrenceMonth = ((cursor - 1) % 12) + 1;
+      return dateForMonthlyOccurrence(occurrenceYear, occurrenceMonth, dueDay);
+    });
+  }
+
+  const startDate = startOfDay(generation.startDate ?? input.date);
+  const endDate = startOfDay(generation.endDate ?? input.date);
+
+  if (endDate < startDate) {
+    const error = new Error('Periodo final da recorrencia anterior ao periodo inicial') as Error & { statusCode: number };
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const dates: Date[] = [];
+  if (input.recurrenceType === RecurrenceType.DAILY) {
+    for (let date = startDate; date <= endDate && dates.length < maxOccurrences; date = addDays(date, 1)) {
+      dates.push(date);
+    }
+    return dates;
+  }
+
+  if (input.recurrenceType === RecurrenceType.WEEKLY) {
+    const targetWeekday = input.dueDay ?? jsWeekdayToFormWeekday(startDate);
+    const firstOffset = (targetWeekday - jsWeekdayToFormWeekday(startDate) + 7) % 7;
+    for (let date = addDays(startDate, firstOffset); date <= endDate && dates.length < maxOccurrences; date = addDays(date, 7)) {
+      dates.push(date);
+    }
+    return dates;
+  }
+
+  if (input.recurrenceType === RecurrenceType.YEARLY) {
+    for (let index = 0, date = startDate; date <= endDate && dates.length < maxOccurrences; index += 1, date = addYearsClamped(startDate, index)) {
+      dates.push(date);
+    }
+  }
+
+  return dates;
+}
+
 function targetMonthsForValueUpdate(startMonth: number, scope: UpdateFinancialItemValueInput['scope']) {
   if (scope === 'ONLY_THIS_PERIOD') return [startMonth];
   if (scope === 'FROM_THIS_PERIOD_FORWARD') {
@@ -613,31 +701,20 @@ export async function listSalaryCandidates(userId: string, filters: SalaryCandid
 
 export async function createFinancialItem(userId: string, input: CreateFinancialItemInput) {
   assertNotManualSavingsRedemption(input);
-  if (input.recurrenceType === RecurrenceType.MONTHLY && input.recurrenceGeneration) {
-    const generation = input.recurrenceGeneration;
-    const startMonth = generation.mode === 'ALL_YEAR' ? 1 : generation.startMonth;
-    const startYear = generation.startYear;
-    const endMonth = generation.endMonth;
-    const endYear = generation.endYear;
-    const startCursor = monthCursor(startYear, startMonth);
-    const endCursor = monthCursor(endYear, endMonth);
-    const dueDay = input.dueDay ?? input.date.getDate();
-
-    if (endCursor < startCursor) {
-      const error = new Error('Periodo final da recorrencia anterior ao periodo inicial') as Error & { statusCode: number };
+  if (input.recurrenceType && input.recurrenceType !== RecurrenceType.NONE && input.recurrenceGeneration) {
+    const occurrenceDates = recurringDatesForInput(input);
+    if (!occurrenceDates.length) {
+      const error = new Error('Nenhuma ocorrencia encontrada para o periodo informado') as Error & { statusCode: number };
       error.statusCode = 400;
       throw error;
     }
-
     const recurrenceGroupId =
       input.recurrenceGroupId ??
       `${userId}:${input.type}:${input.category ?? 'Outros'}:${input.name ?? input.title ?? 'Lancamento'}:${Date.now()}`;
     const items = await prisma.$transaction(
-      Array.from({ length: endCursor - startCursor + 1 }, (_, index) => {
-        const cursor = startCursor + index;
-        const occurrenceYear = Math.floor((cursor - 1) / 12);
-        const occurrenceMonth = ((cursor - 1) % 12) + 1;
-        const occurrenceDate = dateForMonthlyOccurrence(occurrenceYear, occurrenceMonth, dueDay);
+      occurrenceDates.map((occurrenceDate) => {
+        const occurrenceYear = occurrenceDate.getFullYear();
+        const occurrenceMonth = occurrenceDate.getMonth() + 1;
         const isExpense = input.type === 'EXPENSE';
         const data = normalizeWriteInput({
           ...input,
@@ -648,7 +725,7 @@ export async function createFinancialItem(userId: string, input: CreateFinancial
           paymentDate: isExpense ? null : occurrenceDate,
           status: isExpense ? PaymentStatus.PENDENTE : PaymentStatus.PAGO,
           isFixed: true,
-          recurrenceType: RecurrenceType.MONTHLY,
+          recurrenceType: input.recurrenceType,
           recurrenceGroupId,
           recurrenceGeneration: undefined
         });

@@ -45,6 +45,7 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
       trialEndsAt: true,
       manualAccessUntil: true,
       accessBlockedAt: true,
+      subscriptionPlan: true,
       subscriptionCurrentPeriodEnd: true,
       planProductKeysSnapshot: true
     }
