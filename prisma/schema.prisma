@@ -77,6 +77,36 @@ enum CouponDiscountType {
   FIXED
 }
 
+enum ReferralCommissionStatus {
+  PENDING
+  APPROVED
+  PAID
+  CANCELED
+}
+
+enum ReferralPayoutPreference {
+  CREDIT
+  PIX
+}
+
+enum PixKeyType {
+  CPF_CNPJ
+  EMAIL
+  PHONE
+  RANDOM
+}
+
+enum ReferralSettlementType {
+  CREDIT
+  PIX
+}
+
+enum ReferralWithdrawalStatus {
+  REQUESTED
+  PAID
+  CANCELED
+}
+
 model User {
   id            String          @id @default(uuid())
   name          String
@@ -123,6 +153,17 @@ model User {
   reminders     FinancialReminder[]
   pushTokens    PushToken[]
   financialTablePreference FinancialTablePreference?
+  referralCoupon ReferralCoupon?
+  referralPayoutPreference ReferralPayoutPreference @default(CREDIT)
+  referralPayoutChangedAt DateTime?
+  referralPixKeyType PixKeyType?
+  referralPixKey String?
+  referralPixHolderName String?
+  referralTermsAcceptedAt DateTime?
+  referralTermsVersion String?
+  referralCommissionsEarned ReferralCommission[] @relation("ReferralCommissionsEarned")
+  referralCommissionsGenerated ReferralCommission[] @relation("ReferralCommissionsGenerated")
+  referralWithdrawals ReferralWithdrawal[]
   subscriptionEvents SubscriptionEvent[]
   subscriptionTermsAcceptances SubscriptionTermsAcceptance[]
   adminAuditLogs AdminAuditLog[]
@@ -221,6 +262,7 @@ model BillingPlan {
   sortOrder      Int      @default(0)
   users          User[]
   coupons        BillingCoupon[]
+  referralCommissions ReferralCommission[]
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -247,6 +289,112 @@ model BillingCoupon {
   @@index([code])
   @@index([active])
   @@index([billingPlanId])
+}
+
+model ReferralCoupon {
+  id              String             @id @default(uuid())
+  userId          String             @unique
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code            String             @unique
+  active          Boolean            @default(true)
+  discountType    CouponDiscountType @default(PERCENT)
+  discountValue   Decimal            @default(5) @db.Decimal(12, 2)
+  commissionType  CouponDiscountType @default(PERCENT)
+  commissionValue Decimal            @default(5) @db.Decimal(12, 2)
+  planCommissions Json               @default("{}")
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  commissions     ReferralCommission[]
+
+  @@index([code])
+  @@index([active])
+}
+
+model ReferralCommission {
+  id               String                   @id @default(uuid())
+  referralCouponId String
+  referralCoupon   ReferralCoupon           @relation(fields: [referralCouponId], references: [id], onDelete: Cascade)
+  referrerUserId   String
+  referrerUser     User                     @relation("ReferralCommissionsEarned", fields: [referrerUserId], references: [id], onDelete: Cascade)
+  referredUserId   String
+  referredUser     User                     @relation("ReferralCommissionsGenerated", fields: [referredUserId], references: [id], onDelete: Cascade)
+  billingPlanId    String?
+  billingPlan      BillingPlan?             @relation(fields: [billingPlanId], references: [id], onDelete: SetNull)
+  subscriptionEventId String?
+  baseAmount       Decimal                  @db.Decimal(12, 2)
+  amount           Decimal                  @db.Decimal(12, 2)
+  availableAt      DateTime?
+  status           ReferralCommissionStatus @default(PENDING)
+  notes            String?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+  settlements      ReferralCommissionSettlement[]
+
+  @@index([referralCouponId])
+  @@index([referrerUserId])
+  @@index([referredUserId])
+  @@index([billingPlanId])
+  @@index([status])
+  @@unique([referralCouponId, referredUserId, billingPlanId])
+}
+
+model ReferralWithdrawal {
+  id             String                   @id @default(uuid())
+  userId         String
+  user           User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount         Decimal                  @db.Decimal(12, 2)
+  status         ReferralWithdrawalStatus @default(REQUESTED)
+  pixKeyType     PixKeyType
+  pixKey         String
+  pixHolderName  String
+  requestedAt    DateTime                 @default(now())
+  paidAt         DateTime?
+  canceledAt     DateTime?
+  adminNotes     String?
+  settlements    ReferralCommissionSettlement[]
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([requestedAt])
+}
+
+model ReferralCommissionSettlement {
+  id                  String                 @id @default(uuid())
+  commissionId        String
+  commission          ReferralCommission     @relation(fields: [commissionId], references: [id], onDelete: Cascade)
+  withdrawalId        String?
+  withdrawal          ReferralWithdrawal?    @relation(fields: [withdrawalId], references: [id], onDelete: SetNull)
+  type                ReferralSettlementType
+  amount              Decimal                @db.Decimal(12, 2)
+  reference           String?
+  createdAt           DateTime               @default(now())
+
+  @@index([commissionId])
+  @@index([withdrawalId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model MarketingBanner {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  variant   String   @default("REFERRAL")
+  title     String
+  subtitle  String
+  imageUrl  String?
+  ctaLabel  String?
+  ctaPath   String?
+  location  String   @default("DASHBOARD")
+  active    Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([location])
+  @@index([active])
+  @@index([sortOrder])
 }
 
 model AppSetting {

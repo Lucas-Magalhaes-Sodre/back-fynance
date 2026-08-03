@@ -1,8 +1,9 @@
 import { prisma } from '../../shared/prisma.js';
 import { env } from '../../shared/env.js';
-import { normalizePlanIncludedItems, normalizePlanProductKeys, normalizePlanProductLabels } from '../../shared/plan-products.js';
+import { PLAN_PRODUCT_KEYS, normalizePlanIncludedItems, normalizePlanProductKeys, normalizePlanProductLabels } from '../../shared/plan-products.js';
 import { accessInfo } from '../billing/access.service.js';
-import type { AdminUpdateSubscriptionInput, AnonymizeUserInput, AppSettingsInput, BillingCouponInput, BillingPlanInput, BillingPlanOrderInput, GrantTrialInput } from './admin.schemas.js';
+import { defaultReferralBanner, ensureReferralCoupon, isMissingReferralSchemaError } from '../referrals/referral.service.js';
+import type { AdminReferralCommissionInput, AdminReferralCouponInput, AdminReferralWithdrawalInput, AdminUpdateSubscriptionInput, AnonymizeUserInput, AppSettingsInput, BillingCouponInput, BillingPlanInput, BillingPlanOrderInput, GrantTrialInput, MarketingBannerInput, MarketingBannerOrderInput } from './admin.schemas.js';
 
 const adminUserSelect = {
   id: true,
@@ -85,6 +86,55 @@ function serializeCoupon(coupon: {
   return { ...coupon, discountValue: Number(coupon.discountValue) };
 }
 
+function serializeReferralCoupon(coupon: {
+  id: string;
+  userId: string;
+  code: string;
+  active: boolean;
+  discountType: 'PERCENT' | 'FIXED';
+  discountValue: unknown;
+  commissionType: 'PERCENT' | 'FIXED';
+  commissionValue: unknown;
+  planCommissions: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+  user?: { name: string; email: string };
+  _count?: { commissions: number };
+}) {
+  return {
+    ...coupon,
+    discountValue: Number(coupon.discountValue),
+    commissionValue: Number(coupon.commissionValue)
+  };
+}
+
+function referralSchemaUnavailableError() {
+  const error = new Error('Estrutura de indicações ainda não está disponível. Aplique as migrations do banco de dados.') as Error & { statusCode: number };
+  error.statusCode = 503;
+  return error;
+}
+
+async function ensureDefaultAdminMarketingBanner() {
+  const fallback = defaultReferralBanner();
+  return prisma.marketingBanner.upsert({
+    where: { key: fallback.key },
+    update: {},
+    create: {
+      id: fallback.id,
+      key: fallback.key,
+      variant: fallback.variant,
+      title: fallback.title,
+      subtitle: fallback.subtitle,
+      imageUrl: fallback.imageUrl,
+      ctaLabel: fallback.ctaLabel,
+      ctaPath: fallback.ctaPath,
+      location: fallback.location,
+      active: fallback.active,
+      sortOrder: fallback.sortOrder
+    }
+  });
+}
+
 function legacySnapshotPrice(user: { subscriptionPlan: 'FREE' | 'MONTHLY' | 'YEARLY' | 'LIFETIME' }) {
   if (user.subscriptionPlan === 'MONTHLY') return { price: 24.9, duration: 1 };
   if (user.subscriptionPlan === 'YEARLY') return { price: 238.9, duration: 12 };
@@ -104,7 +154,7 @@ function adminLifetimeAccessData() {
     planNameSnapshot: 'Vitalício',
     planPriceSnapshot: 0,
     planDurationMonthsSnapshot: null,
-    planProductKeysSnapshot: [],
+    planProductKeysSnapshot: PLAN_PRODUCT_KEYS,
     planProductLabelsSnapshot: {},
     planIncludedItemsSnapshot: [],
     couponCodeSnapshot: null,
@@ -346,7 +396,10 @@ export async function updateAppSettings(input: AppSettingsInput) {
 export async function updateAdminUserSubscription(userId: string, input: AdminUpdateSubscriptionInput) {
   const currentUser = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
   const nextRole = input.role ?? currentUser?.role ?? 'USER';
-  const adminAccessData = nextRole === 'ADMIN' ? adminLifetimeAccessData() : {};
+  const lifetimeAccessData =
+    nextRole === 'ADMIN' || input.subscriptionPlan === 'LIFETIME'
+      ? adminLifetimeAccessData()
+      : {};
   const user = await prisma.user.update({
     where: { id: userId },
     data: {
@@ -356,7 +409,8 @@ export async function updateAdminUserSubscription(userId: string, input: AdminUp
       manualAccessUntil: input.manualAccessUntil,
       accessBlockedAt: input.accessBlockedAt,
       subscriptionPlan: input.subscriptionPlan,
-      ...adminAccessData
+      subscriptionCurrentPeriodEnd: input.subscriptionCurrentPeriodEnd,
+      ...lifetimeAccessData
     },
     select: adminUserSelect
   });
@@ -560,6 +614,244 @@ export async function deactivateAdminBillingCoupon(couponId: string) {
     data: { active: false }
   });
   return serializeCoupon(coupon);
+}
+
+async function referralCodeAvailable(code: string, currentCouponId?: string) {
+  const normalizedCode = code.trim().toUpperCase();
+  const [billingCoupon, referralCoupon] = await Promise.all([
+    prisma.billingCoupon.findUnique({ where: { code: normalizedCode }, select: { id: true } }),
+    prisma.referralCoupon.findUnique({ where: { code: normalizedCode }, select: { id: true } })
+  ]);
+  return !billingCoupon && (!referralCoupon || referralCoupon.id === currentCouponId);
+}
+
+export async function listAdminReferralCoupons() {
+  try {
+    const usersWithoutCoupon = await prisma.user.findMany({
+      where: { referralCoupon: null },
+      select: { id: true }
+    });
+    await Promise.all(usersWithoutCoupon.map((user) => ensureReferralCoupon(user.id).catch(() => null)));
+
+    const coupons = await prisma.referralCoupon.findMany({
+      include: {
+        user: { select: { name: true, email: true } },
+        _count: { select: { commissions: true } }
+      },
+      orderBy: [{ active: 'desc' }, { createdAt: 'desc' }]
+    });
+    return coupons.map(serializeReferralCoupon);
+  } catch (error) {
+    if (isMissingReferralSchemaError(error)) return [];
+    throw error;
+  }
+}
+
+export async function updateAdminReferralCoupon(couponId: string, input: AdminReferralCouponInput) {
+  try {
+    const code = input.code.trim().toUpperCase();
+    if (!(await referralCodeAvailable(code, couponId))) {
+      const error = new Error('Esse nome de cupom ja esta em uso.') as Error & { statusCode: number };
+      error.statusCode = 409;
+      throw error;
+    }
+    const coupon = await prisma.referralCoupon.update({
+      where: { id: couponId },
+      data: {
+        code,
+        active: input.active,
+        discountType: input.discountType,
+        discountValue: input.discountValue,
+        commissionType: input.commissionType,
+        commissionValue: input.commissionValue,
+        planCommissions: input.planCommissions
+      },
+      include: {
+        user: { select: { name: true, email: true } },
+        _count: { select: { commissions: true } }
+      }
+    });
+    return serializeReferralCoupon(coupon);
+  } catch (error) {
+    if (isMissingReferralSchemaError(error)) throw referralSchemaUnavailableError();
+    throw error;
+  }
+}
+
+export async function listAdminReferralCommissions() {
+  try {
+    const commissions = await prisma.referralCommission.findMany({
+      include: {
+        referrerUser: { select: { name: true, email: true } },
+        referredUser: { select: { name: true, email: true } },
+        billingPlan: { select: { name: true } },
+        referralCoupon: { select: { code: true } }
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 300
+    });
+    return commissions.map((commission) => ({
+      ...commission,
+      amount: Number(commission.amount),
+      baseAmount: Number(commission.baseAmount)
+    }));
+  } catch (error) {
+    if (isMissingReferralSchemaError(error)) return [];
+    throw error;
+  }
+}
+
+export async function updateAdminReferralCommission(commissionId: string, input: AdminReferralCommissionInput) {
+  try {
+    const commission = await prisma.referralCommission.update({
+      where: { id: commissionId },
+      data: {
+        status: input.status,
+        notes: input.notes
+      },
+      include: {
+        referrerUser: { select: { name: true, email: true } },
+        referredUser: { select: { name: true, email: true } },
+        billingPlan: { select: { name: true } },
+        referralCoupon: { select: { code: true } }
+      }
+    });
+    return {
+      ...commission,
+      amount: Number(commission.amount),
+      baseAmount: Number(commission.baseAmount)
+    };
+  } catch (error) {
+    if (isMissingReferralSchemaError(error)) throw referralSchemaUnavailableError();
+    throw error;
+  }
+}
+
+export async function listAdminReferralWithdrawals() {
+  try {
+    const withdrawals = await prisma.referralWithdrawal.findMany({
+      include: {
+        user: { select: { name: true, email: true } },
+        settlements: { select: { id: true } }
+      },
+      orderBy: { requestedAt: 'desc' },
+      take: 300
+    });
+    return withdrawals.map((withdrawal) => ({
+      ...withdrawal,
+      amount: Number(withdrawal.amount),
+      settlementsCount: withdrawal.settlements.length
+    }));
+  } catch (error) {
+    if (isMissingReferralSchemaError(error)) return [];
+    throw error;
+  }
+}
+
+export async function updateAdminReferralWithdrawal(withdrawalId: string, input: AdminReferralWithdrawalInput) {
+  try {
+    return await prisma.$transaction(async (tx) => {
+      if (input.status === 'CANCELED') {
+        await tx.referralCommissionSettlement.deleteMany({ where: { withdrawalId } });
+      }
+      const withdrawal = await tx.referralWithdrawal.update({
+        where: { id: withdrawalId },
+        data: {
+          status: input.status,
+          paidAt: input.status === 'PAID' ? new Date() : undefined,
+          canceledAt: input.status === 'CANCELED' ? new Date() : undefined,
+          adminNotes: input.adminNotes
+        },
+        include: {
+          user: { select: { name: true, email: true } },
+          settlements: { select: { id: true } }
+        }
+      });
+      return {
+        ...withdrawal,
+        amount: Number(withdrawal.amount),
+        settlementsCount: withdrawal.settlements.length
+      };
+    });
+  } catch (error) {
+    if (isMissingReferralSchemaError(error)) throw referralSchemaUnavailableError();
+    throw error;
+  }
+}
+
+export async function listAdminMarketingBanners() {
+  try {
+    await ensureDefaultAdminMarketingBanner();
+    return await prisma.marketingBanner.findMany({
+      orderBy: [{ location: 'asc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }]
+    });
+  } catch (error) {
+    if (isMissingReferralSchemaError(error)) return [];
+    throw error;
+  }
+}
+
+export async function deleteAdminMarketingBanner(bannerId: string) {
+  try {
+    return await prisma.marketingBanner.delete({
+      where: { id: bannerId }
+    });
+  } catch (error) {
+    if (isMissingReferralSchemaError(error)) throw referralSchemaUnavailableError();
+    throw error;
+  }
+}
+
+export async function createAdminMarketingBanner(input: MarketingBannerInput) {
+  try {
+    const banner = await prisma.marketingBanner.create({
+      data: {
+        key: `banner-${Date.now()}`,
+        variant: input.variant,
+        title: input.title,
+        subtitle: input.subtitle,
+        imageUrl: input.imageUrl,
+        ctaLabel: input.ctaLabel,
+        ctaPath: input.ctaPath,
+        location: input.location,
+        active: input.active,
+        sortOrder: input.sortOrder
+      }
+    });
+    return banner;
+  } catch (error) {
+    if (isMissingReferralSchemaError(error)) throw referralSchemaUnavailableError();
+    throw error;
+  }
+}
+
+export async function updateAdminMarketingBanner(bannerId: string, input: MarketingBannerInput) {
+  try {
+    return await prisma.marketingBanner.update({
+      where: { id: bannerId },
+      data: input
+    });
+  } catch (error) {
+    if (isMissingReferralSchemaError(error)) throw referralSchemaUnavailableError();
+    throw error;
+  }
+}
+
+export async function reorderAdminMarketingBanners(input: MarketingBannerOrderInput) {
+  try {
+    await prisma.$transaction(
+      input.bannerIds.map((id, index) =>
+        prisma.marketingBanner.update({
+          where: { id },
+          data: { sortOrder: (index + 1) * 10 }
+        })
+      )
+    );
+    return listAdminMarketingBanners();
+  } catch (error) {
+    if (isMissingReferralSchemaError(error)) throw referralSchemaUnavailableError();
+    throw error;
+  }
 }
 
 export async function grantTrial(userId: string, input: GrantTrialInput) {
