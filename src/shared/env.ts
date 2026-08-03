@@ -13,7 +13,10 @@ const envSchema = z.object({
   MERCADO_PAGO_YEARLY_PLAN_URL: z.string().url().optional(),
   MERCADO_PAGO_WEBHOOK_SECRET: z.string().optional(),
   ADMIN_EMAILS: z.string().optional(),
-  GOOGLE_CLIENT_ID: z.string().optional()
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  WEB_PUSH_PUBLIC_KEY: z.string().optional(),
+  WEB_PUSH_PRIVATE_KEY: z.string().optional(),
+  WEB_PUSH_SUBJECT: z.string().optional()
 });
 
 export const env = envSchema.parse(process.env);

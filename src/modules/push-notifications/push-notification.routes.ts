@@ -3,12 +3,14 @@ import { authenticate } from '../users/authenticate.js';
 import {
   deactivatePushTokenController,
   dispatchDuePushRemindersController,
+  getWebPushPublicKeyController,
   registerPushTokenController
 } from './push-notification.controller.js';
 
 export async function pushNotificationRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
 
+  app.get('/web/public-key', getWebPushPublicKeyController);
   app.post('/tokens', registerPushTokenController);
   app.delete('/tokens', deactivatePushTokenController);
   app.post('/dispatch-due', dispatchDuePushRemindersController);

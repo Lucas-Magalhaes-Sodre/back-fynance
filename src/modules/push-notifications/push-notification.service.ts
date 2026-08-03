@@ -1,5 +1,7 @@
 import { prisma } from '../../shared/prisma.js';
+import { env } from '../../shared/env.js';
 import type { RegisterPushTokenInput } from './push-notification.schemas.js';
+import webPush, { type PushSubscription } from 'web-push';
 
 type ExpoPushMessage = {
   to: string;
@@ -10,6 +12,15 @@ type ExpoPushMessage = {
 };
 
 const expoPushUrl = 'https://exp.host/--/api/v2/push/send';
+const webPushPlatform = 'WEB';
+
+if (env.WEB_PUSH_PUBLIC_KEY && env.WEB_PUSH_PRIVATE_KEY) {
+  webPush.setVapidDetails(
+    env.WEB_PUSH_SUBJECT || 'mailto:suporte@deluketfinance.com',
+    env.WEB_PUSH_PUBLIC_KEY,
+    env.WEB_PUSH_PRIVATE_KEY
+  );
+}
 
 function chunk<T>(items: T[], size: number) {
   const chunks: T[][] = [];
@@ -23,9 +34,41 @@ function isExpoPushToken(token: string) {
   return token.startsWith('ExponentPushToken[') || token.startsWith('ExpoPushToken[');
 }
 
+function isWebPushPlatform(platform?: string | null) {
+  return platform?.toUpperCase() === webPushPlatform;
+}
+
+function parseWebPushSubscription(token: string): PushSubscription | null {
+  try {
+    const parsed = JSON.parse(token) as PushSubscription;
+    if (!parsed.endpoint || !parsed.keys?.p256dh || !parsed.keys?.auth) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function isValidWebPushSubscription(token: string) {
+  return Boolean(parseWebPushSubscription(token));
+}
+
+export function webPushAvailable() {
+  return Boolean(env.WEB_PUSH_PUBLIC_KEY && env.WEB_PUSH_PRIVATE_KEY);
+}
+
+export function getWebPushPublicKey() {
+  return env.WEB_PUSH_PUBLIC_KEY ?? '';
+}
+
 export async function registerPushToken(userId: string, input: RegisterPushTokenInput) {
   const token = input.token.trim();
-  if (!isExpoPushToken(token)) {
+  const platform = input.platform?.trim().toUpperCase() ?? null;
+  if (isWebPushPlatform(platform) && !isValidWebPushSubscription(token)) {
+    const error = new Error('Inscricao web push invalida') as Error & { statusCode: number };
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!isWebPushPlatform(platform) && !isExpoPushToken(token)) {
     const error = new Error('Token push invalido') as Error & { statusCode: number };
     error.statusCode = 400;
     throw error;
@@ -36,12 +79,12 @@ export async function registerPushToken(userId: string, input: RegisterPushToken
     create: {
       userId,
       token,
-      platform: input.platform ?? null,
+      platform,
       deviceName: input.deviceName ?? null
     },
     update: {
       userId,
-      platform: input.platform ?? null,
+      platform,
       deviceName: input.deviceName ?? null,
       isActive: true
     }
@@ -75,6 +118,12 @@ async function sendExpoPushMessages(messages: ExpoPushMessage[]) {
   }
 }
 
+async function sendWebPushMessage(subscription: PushSubscription, payload: object) {
+  if (!webPushAvailable()) return false;
+  await webPush.sendNotification(subscription, JSON.stringify(payload));
+  return true;
+}
+
 export async function dispatchDuePushReminders(now = new Date()) {
   const reminders = await prisma.financialReminder.findMany({
     where: {
@@ -104,7 +153,7 @@ export async function dispatchDuePushReminders(now = new Date()) {
 
   const messages = reminders.flatMap((reminder) =>
     reminder.user.pushTokens
-      .filter((pushToken) => isExpoPushToken(pushToken.token))
+      .filter((pushToken) => !isWebPushPlatform(pushToken.platform) && isExpoPushToken(pushToken.token))
       .map((pushToken) => ({
         to: pushToken.token,
         sound: 'default' as const,
@@ -122,14 +171,58 @@ export async function dispatchDuePushReminders(now = new Date()) {
       }))
   );
 
+  const webReminderIds = new Set<string>();
+  let webMessages = 0;
+  await Promise.all(
+    reminders.flatMap((reminder) =>
+      reminder.user.pushTokens
+        .filter((pushToken) => isWebPushPlatform(pushToken.platform))
+        .map(async (pushToken) => {
+          const subscription = parseWebPushSubscription(pushToken.token);
+          if (!subscription) {
+            await prisma.pushToken.update({ where: { id: pushToken.id }, data: { isActive: false } }).catch(() => null);
+            return;
+          }
+          try {
+            const sent = await sendWebPushMessage(subscription, {
+              title: reminder.title,
+              body:
+                reminder.message ||
+                `Lembrete financeiro: ${
+                  reminder.financialItem?.title ?? reminder.saving?.title ?? reminder.title
+                }`,
+              url: '/app',
+              reminderId: reminder.id,
+              financialItemId: reminder.financialItemId,
+              savingId: reminder.savingId
+            });
+            if (sent) {
+              webMessages += 1;
+              webReminderIds.add(reminder.id);
+            }
+          } catch (error) {
+            const statusCode = (error as { statusCode?: number }).statusCode;
+            if (statusCode === 404 || statusCode === 410) {
+              await prisma.pushToken.update({ where: { id: pushToken.id }, data: { isActive: false } }).catch(() => null);
+            }
+          }
+        })
+    )
+  );
+
   await sendExpoPushMessages(messages);
 
-  if (reminders.length) {
+  const sentReminderIds = Array.from(new Set([
+    ...messages.map((message) => String(message.data?.reminderId ?? '')).filter(Boolean),
+    ...webReminderIds
+  ]));
+
+  if (sentReminderIds.length) {
     await prisma.financialReminder.updateMany({
-      where: { id: { in: reminders.map((reminder) => reminder.id) } },
+      where: { id: { in: sentReminderIds } },
       data: { sentAt: now }
     });
   }
 
-  return { reminders: reminders.length, messages: messages.length };
+  return { reminders: reminders.length, messages: messages.length + webMessages };
 }

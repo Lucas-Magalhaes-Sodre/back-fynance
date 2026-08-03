@@ -4,6 +4,7 @@ import { registerPushTokenSchema } from './push-notification.schemas.js';
 import {
   deactivatePushToken,
   dispatchDuePushReminders,
+  getWebPushPublicKey,
   registerPushToken
 } from './push-notification.service.js';
 
@@ -13,6 +14,14 @@ export async function registerPushTokenController(request: FastifyRequest, reply
   const data = registerPushTokenSchema.parse(request.body);
   const pushToken = await registerPushToken(request.user.sub, data);
   return reply.status(201).send({ pushToken });
+}
+
+export async function getWebPushPublicKeyController(_request: FastifyRequest, reply: FastifyReply) {
+  const publicKey = getWebPushPublicKey();
+  return reply.send({
+    available: Boolean(publicKey),
+    publicKey
+  });
 }
 
 export async function deactivatePushTokenController(request: FastifyRequest, reply: FastifyReply) {
