@@ -20,7 +20,9 @@ const savingsBaseSchema = z.object({
     startMonth: z.coerce.number().int().min(1).max(12),
     startYear: z.coerce.number().int().min(1900).max(3000),
     endMonth: z.coerce.number().int().min(1).max(12),
-    endYear: z.coerce.number().int().min(1900).max(3000)
+    endYear: z.coerce.number().int().min(1900).max(3000),
+    startDate: z.coerce.date().optional(),
+    endDate: z.coerce.date().optional()
   }).optional(),
   goalId: z.string().uuid().optional().nullable(),
   hasYield: z.coerce.boolean().optional(),

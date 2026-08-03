@@ -38,6 +38,20 @@ function startOfTomorrow() {
   return date;
 }
 
+function startOfCurrentMonth() {
+  const date = new Date();
+  date.setDate(1);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function endOfCurrentMonth() {
+  const date = new Date();
+  date.setMonth(date.getMonth() + 1, 0);
+  date.setHours(23, 59, 59, 999);
+  return date;
+}
+
 function endOfDate(value: Date) {
   const date = new Date(value);
   date.setHours(23, 59, 59, 999);
@@ -158,6 +172,85 @@ function monthCursorValue(yearValue: number, monthValue: number) {
   return yearValue * 12 + monthValue;
 }
 
+function startOfDay(value: Date) {
+  const date = new Date(value);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function addDays(value: Date, days: number) {
+  const date = new Date(value);
+  date.setDate(date.getDate() + days);
+  return date;
+}
+
+function addYearsClamped(value: Date, years: number) {
+  return dateForMonthlyOccurrence(value.getFullYear() + years, value.getMonth() + 1, value.getDate());
+}
+
+function jsWeekdayToFormWeekday(value: Date) {
+  const day = value.getDay();
+  return day === 0 ? 7 : day;
+}
+
+function recurringSavingDatesForInput(input: CreateSavingInput) {
+  if (!input.recurrenceType || input.recurrenceType === RecurrenceType.NONE || !input.recurrenceGeneration) return [];
+
+  const generation = input.recurrenceGeneration;
+  const maxOccurrences = 15_000;
+
+  if (input.recurrenceType === RecurrenceType.MONTHLY) {
+    const startCursor = monthCursorValue(generation.startYear, generation.startMonth);
+    const endCursor = monthCursorValue(generation.endYear, generation.endMonth);
+    const dueDay = input.date.getDate();
+    if (endCursor < startCursor) {
+      const error = new Error('Periodo final da recorrencia anterior ao periodo inicial') as Error & { statusCode: number };
+      error.statusCode = 400;
+      throw error;
+    }
+
+    return Array.from({ length: endCursor - startCursor + 1 }, (_, index) => {
+      const cursor = startCursor + index;
+      const occurrenceYear = Math.floor((cursor - 1) / 12);
+      const occurrenceMonth = ((cursor - 1) % 12) + 1;
+      return dateForMonthlyOccurrence(occurrenceYear, occurrenceMonth, dueDay);
+    });
+  }
+
+  const startDate = startOfDay(generation.startDate ?? input.date);
+  const endDate = startOfDay(generation.endDate ?? input.date);
+  if (endDate < startDate) {
+    const error = new Error('Periodo final da recorrencia anterior ao periodo inicial') as Error & { statusCode: number };
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const dates: Date[] = [];
+  if (input.recurrenceType === RecurrenceType.DAILY) {
+    for (let date = startDate; date <= endDate && dates.length < maxOccurrences; date = addDays(date, 1)) {
+      dates.push(date);
+    }
+    return dates;
+  }
+
+  if (input.recurrenceType === RecurrenceType.WEEKLY) {
+    const targetWeekday = input.date ? jsWeekdayToFormWeekday(input.date) : jsWeekdayToFormWeekday(startDate);
+    const firstOffset = (targetWeekday - jsWeekdayToFormWeekday(startDate) + 7) % 7;
+    for (let date = addDays(startDate, firstOffset); date <= endDate && dates.length < maxOccurrences; date = addDays(date, 7)) {
+      dates.push(date);
+    }
+    return dates;
+  }
+
+  if (input.recurrenceType === RecurrenceType.YEARLY) {
+    for (let index = 0, date = startDate; date <= endDate && dates.length < maxOccurrences; index += 1, date = addYearsClamped(startDate, index)) {
+      dates.push(date);
+    }
+  }
+
+  return dates;
+}
+
 function incomeTypes(): FinancialItemType[] {
   return [FinancialItemType.INCOME];
 }
@@ -199,25 +292,19 @@ export async function listSavings(userId: string, filters: ListSavingsInput) {
 export async function createSaving(userId: string, input: CreateSavingInput) {
   await assertGoalOwnership(userId, input.goalId);
 
-  if (input.recurrenceType === RecurrenceType.MONTHLY && input.recurrenceGeneration) {
-    const generation = input.recurrenceGeneration;
-    const startCursor = monthCursorValue(generation.startYear, generation.startMonth);
-    const endCursor = monthCursorValue(generation.endYear, generation.endMonth);
-    const dueDay = input.date.getDate();
-    if (endCursor < startCursor) {
-      const error = new Error('Periodo final da recorrencia anterior ao periodo inicial') as Error & { statusCode: number };
+  if (input.recurrenceType && input.recurrenceType !== RecurrenceType.NONE && input.recurrenceGeneration) {
+    const occurrenceDates = recurringSavingDatesForInput(input);
+    if (!occurrenceDates.length) {
+      const error = new Error('Nenhuma ocorrencia encontrada para o periodo informado') as Error & { statusCode: number };
       error.statusCode = 400;
       throw error;
     }
-
     const category = input.category?.trim() || 'Outros';
     const recurrenceGroupId = input.recurrenceGroupId ?? `${userId}:INVESTMENT:${category}:${input.title}:${Date.now()}`;
     const savings = await prisma.$transaction(
-      Array.from({ length: endCursor - startCursor + 1 }, (_, index) => {
-        const cursor = startCursor + index;
-        const occurrenceYear = Math.floor((cursor - 1) / 12);
-        const occurrenceMonth = ((cursor - 1) % 12) + 1;
-        const occurrenceDate = dateForMonthlyOccurrence(occurrenceYear, occurrenceMonth, dueDay);
+      occurrenceDates.map((occurrenceDate) => {
+        const occurrenceYear = occurrenceDate.getFullYear();
+        const occurrenceMonth = occurrenceDate.getMonth() + 1;
         return prisma.savings.create({
           data: {
             userId,
@@ -228,7 +315,7 @@ export async function createSaving(userId: string, input: CreateSavingInput) {
               year: occurrenceYear,
               category,
               isFixed: true,
-              recurrenceType: RecurrenceType.MONTHLY,
+              recurrenceType: input.recurrenceType,
               recurrenceGroupId
             })
           }
@@ -262,11 +349,20 @@ export async function transferSavings(userId: string, input: SavingsTransferInpu
 
   return prisma.$transaction(async (tx) => {
     if (input.direction === 'WITHDRAW_TO_BALANCE') {
+      if (date < startOfCurrentMonth() || date > endOfCurrentMonth()) {
+        const error = new Error('Resgate de economia deve ser feito dentro do mes atual') as Error & {
+          statusCode: number;
+        };
+        error.statusCode = 400;
+        throw error;
+      }
+
       const available = await tx.savings.aggregate({
         where: {
           userId,
           category: input.category?.trim() || 'Outros',
-          title: input.title
+          title: input.title,
+          date: { lte: endOfToday() }
         },
         _sum: { amount: true }
       });
