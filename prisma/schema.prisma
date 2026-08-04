@@ -134,6 +134,7 @@ model User {
   subscriptionPlan SubscriptionPlan @default(FREE)
   subscriptionCurrentPeriodEnd DateTime?
   lastPaymentAt DateTime?
+  lastSeenAt DateTime?
   billingPlanId String?
   billingPlan BillingPlan? @relation(fields: [billingPlanId], references: [id], onDelete: SetNull)
   planNameSnapshot String?
@@ -170,6 +171,8 @@ model User {
   financialCategoriesInitialized Boolean @default(false)
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
+
+  @@index([lastSeenAt])
 }
 
 model FinancialTablePreference {

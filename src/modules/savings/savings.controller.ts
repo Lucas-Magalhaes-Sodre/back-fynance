@@ -29,8 +29,8 @@ const idParamsSchema = z.object({ id: z.string().uuid() });
 
 export async function listSavingsController(request: FastifyRequest, reply: FastifyReply) {
   const filters = listSavingsSchema.parse(request.query);
-  const savings = await listSavings(request.user.sub, filters);
-  return reply.send({ savings });
+  const result = await listSavings(request.user.sub, filters);
+  return reply.send(result.pagination ? result : { savings: result.savings });
 }
 
 export async function createSavingController(request: FastifyRequest, reply: FastifyReply) {

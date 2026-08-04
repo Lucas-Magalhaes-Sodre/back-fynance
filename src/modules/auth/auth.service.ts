@@ -43,6 +43,7 @@ function sanitizeUser(user: {
   couponDiscountSnapshot?: unknown | null;
   subscriptionCurrentPeriodEnd?: Date | null;
   lastPaymentAt?: Date | null;
+  lastSeenAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }) {
@@ -90,6 +91,7 @@ function sanitizeUser(user: {
     couponDiscountSnapshot: user.couponDiscountSnapshot ? Number(user.couponDiscountSnapshot) : null,
     subscriptionCurrentPeriodEnd: user.subscriptionCurrentPeriodEnd ?? null,
     lastPaymentAt: user.lastPaymentAt ?? null,
+    lastSeenAt: user.lastSeenAt ?? null,
     access,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt
@@ -147,13 +149,19 @@ export async function registerUser(app: FastifyInstance, input: RegisterInput) {
       cookiesVersion: COOKIES_VERSION,
       marketingConsent: input.marketingConsent,
       role: 'USER',
-      trialEndsAt: trialEndDateWithDays(defaultTrialDays)
+      trialEndsAt: trialEndDateWithDays(defaultTrialDays),
+      lastSeenAt: new Date()
     }
   });
   await ensureReferralCoupon(user.id).catch(() => null);
 
-  const token = app.jwt.sign({ sub: user.id, email: user.email }, { expiresIn: '7d' });
-  return { user: sanitizeUser(user), token };
+  const updatedUser = await prisma.user.update({
+    where: { id: user.id },
+    data: { lastSeenAt: new Date() }
+  });
+
+  const token = app.jwt.sign({ sub: updatedUser.id, email: updatedUser.email }, { expiresIn: '7d' });
+  return { user: sanitizeUser(updatedUser), token };
 }
 
 export async function loginUser(app: FastifyInstance, input: LoginInput) {
@@ -216,9 +224,10 @@ export async function loginWithGoogle(app: FastifyInstance, input: GoogleLoginIn
         ? {
           role: 'ADMIN',
           password_hash: await bcrypt.hash(`google-admin:${payload.sub}:${Date.now()}`, 10),
-          ...adminLifetimeAccessData()
+          ...adminLifetimeAccessData(),
+          lastSeenAt: new Date()
         }
-        : {},
+        : { lastSeenAt: new Date() },
     })
     : await prisma.user.create({
     data: {
@@ -233,6 +242,7 @@ export async function loginWithGoogle(app: FastifyInstance, input: GoogleLoginIn
       cookiesVersion: COOKIES_VERSION,
       marketingConsent: false,
       role: adminRole,
+      lastSeenAt: new Date(),
       ...(adminRole === 'ADMIN'
         ? adminLifetimeAccessData()
         : { trialEndsAt: trialEndDateWithDays(defaultTrialDays) })

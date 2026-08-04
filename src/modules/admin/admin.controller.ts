@@ -55,6 +55,10 @@ const auditLogsQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(5).max(100).default(20)
 });
+const paginationQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(10)
+});
 
 export async function listAdminUsersController(request: FastifyRequest, reply: FastifyReply) {
   const query = usersQuerySchema.parse(request.query);
@@ -204,9 +208,10 @@ export async function reorderAdminBillingPlansController(request: FastifyRequest
   return reply.send({ plans });
 }
 
-export async function listAdminBillingCouponsController(_request: FastifyRequest, reply: FastifyReply) {
-  const coupons = await listAdminBillingCoupons();
-  return reply.send({ coupons });
+export async function listAdminBillingCouponsController(request: FastifyRequest, reply: FastifyReply) {
+  const query = paginationQuerySchema.parse(request.query);
+  const result = await listAdminBillingCoupons(query);
+  return reply.send(result);
 }
 
 export async function createAdminBillingCouponController(request: FastifyRequest, reply: FastifyReply) {
@@ -248,9 +253,10 @@ export async function deactivateAdminBillingCouponController(request: FastifyReq
   return reply.send({ coupon });
 }
 
-export async function listAdminReferralCouponsController(_request: FastifyRequest, reply: FastifyReply) {
-  const coupons = await listAdminReferralCoupons();
-  return reply.send({ coupons });
+export async function listAdminReferralCouponsController(request: FastifyRequest, reply: FastifyReply) {
+  const query = paginationQuerySchema.parse(request.query);
+  const result = await listAdminReferralCoupons(query);
+  return reply.send(result);
 }
 
 export async function updateAdminReferralCouponController(request: FastifyRequest, reply: FastifyReply) {
@@ -267,9 +273,10 @@ export async function updateAdminReferralCouponController(request: FastifyReques
   return reply.send({ coupon });
 }
 
-export async function listAdminReferralCommissionsController(_request: FastifyRequest, reply: FastifyReply) {
-  const commissions = await listAdminReferralCommissions();
-  return reply.send({ commissions });
+export async function listAdminReferralCommissionsController(request: FastifyRequest, reply: FastifyReply) {
+  const query = paginationQuerySchema.parse(request.query);
+  const result = await listAdminReferralCommissions(query);
+  return reply.send(result);
 }
 
 export async function updateAdminReferralCommissionController(request: FastifyRequest, reply: FastifyReply) {
@@ -286,9 +293,10 @@ export async function updateAdminReferralCommissionController(request: FastifyRe
   return reply.send({ commission });
 }
 
-export async function listAdminReferralWithdrawalsController(_request: FastifyRequest, reply: FastifyReply) {
-  const withdrawals = await listAdminReferralWithdrawals();
-  return reply.send({ withdrawals });
+export async function listAdminReferralWithdrawalsController(request: FastifyRequest, reply: FastifyReply) {
+  const query = paginationQuerySchema.parse(request.query);
+  const result = await listAdminReferralWithdrawals(query);
+  return reply.send(result);
 }
 
 export async function updateAdminReferralWithdrawalController(request: FastifyRequest, reply: FastifyReply) {
@@ -305,9 +313,10 @@ export async function updateAdminReferralWithdrawalController(request: FastifyRe
   return reply.send({ withdrawal });
 }
 
-export async function listAdminMarketingBannersController(_request: FastifyRequest, reply: FastifyReply) {
-  const banners = await listAdminMarketingBanners();
-  return reply.send({ banners });
+export async function listAdminMarketingBannersController(request: FastifyRequest, reply: FastifyReply) {
+  const query = paginationQuerySchema.parse(request.query);
+  const result = await listAdminMarketingBanners(query);
+  return reply.send(result);
 }
 
 export async function createAdminMarketingBannerController(request: FastifyRequest, reply: FastifyReply) {

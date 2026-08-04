@@ -29,6 +29,7 @@ const adminUserSelect = {
   couponDiscountSnapshot: true,
   subscriptionCurrentPeriodEnd: true,
   lastPaymentAt: true,
+  lastSeenAt: true,
   createdAt: true,
   updatedAt: true
 };
@@ -112,6 +113,26 @@ function referralSchemaUnavailableError() {
   const error = new Error('Estrutura de indicações ainda não está disponível. Aplique as migrations do banco de dados.') as Error & { statusCode: number };
   error.statusCode = 503;
   return error;
+}
+
+function pagination(input: { page: number; pageSize: number }, minimumPageSize = 1) {
+  const page = Math.max(1, input.page);
+  const pageSize = Math.min(100, Math.max(minimumPageSize, input.pageSize));
+  return {
+    page,
+    pageSize,
+    skip: (page - 1) * pageSize,
+    take: pageSize
+  };
+}
+
+function paginationResult(page: number, pageSize: number, total: number) {
+  return {
+    page,
+    pageSize,
+    total,
+    totalPages: Math.max(1, Math.ceil(total / pageSize))
+  };
 }
 
 async function ensureDefaultAdminMarketingBanner() {
@@ -220,8 +241,7 @@ export async function listAdminUsers(input: {
   role?: 'USER' | 'ADMIN';
   billingPlanId?: string;
 }) {
-  const page = Math.max(1, input.page);
-  const pageSize = Math.min(100, Math.max(5, input.pageSize));
+  const { page, pageSize, skip, take } = pagination(input, 5);
   const search = input.search?.trim();
   const where = {
     ...(search
@@ -241,26 +261,20 @@ export async function listAdminUsers(input: {
       where,
       select: adminUserSelect,
       orderBy: { createdAt: 'desc' },
-      skip: (page - 1) * pageSize,
-      take: pageSize
+      skip,
+      take
     }),
     prisma.user.count({ where })
   ]);
 
   return {
     users: users.map(withAccess),
-    pagination: {
-      page,
-      pageSize,
-      total,
-      totalPages: Math.max(1, Math.ceil(total / pageSize))
-    }
+    pagination: paginationResult(page, pageSize, total)
   };
 }
 
 export async function listAdminAuditLogs(input: { page: number; pageSize: number }) {
-  const page = Math.max(1, input.page);
-  const pageSize = Math.min(100, Math.max(5, input.pageSize));
+  const { page, pageSize, skip, take } = pagination(input, 5);
   const [logs, total] = await prisma.$transaction([
     prisma.adminAuditLog.findMany({
       include: {
@@ -273,20 +287,15 @@ export async function listAdminAuditLogs(input: { page: number; pageSize: number
         }
       },
       orderBy: { createdAt: 'desc' },
-      skip: (page - 1) * pageSize,
-      take: pageSize
+      skip,
+      take
     }),
     prisma.adminAuditLog.count()
   ]);
 
   return {
     logs,
-    pagination: {
-      page,
-      pageSize,
-      total,
-      totalPages: Math.max(1, Math.ceil(total / pageSize))
-    }
+    pagination: paginationResult(page, pageSize, total)
   };
 }
 
@@ -566,11 +575,20 @@ export async function reorderAdminBillingPlans(input: BillingPlanOrderInput) {
   return listAdminBillingPlans();
 }
 
-export async function listAdminBillingCoupons() {
-  const coupons = await prisma.billingCoupon.findMany({
-    orderBy: [{ active: 'desc' }, { createdAt: 'desc' }]
-  });
-  return coupons.map(serializeCoupon);
+export async function listAdminBillingCoupons(input: { page: number; pageSize: number }) {
+  const { page, pageSize, skip, take } = pagination(input);
+  const [coupons, total] = await prisma.$transaction([
+    prisma.billingCoupon.findMany({
+      orderBy: [{ active: 'desc' }, { createdAt: 'desc' }],
+      skip,
+      take
+    }),
+    prisma.billingCoupon.count()
+  ]);
+  return {
+    coupons: coupons.map(serializeCoupon),
+    pagination: paginationResult(page, pageSize, total)
+  };
 }
 
 export async function createAdminBillingCoupon(input: BillingCouponInput) {
@@ -625,24 +643,33 @@ async function referralCodeAvailable(code: string, currentCouponId?: string) {
   return !billingCoupon && (!referralCoupon || referralCoupon.id === currentCouponId);
 }
 
-export async function listAdminReferralCoupons() {
+export async function listAdminReferralCoupons(input: { page: number; pageSize: number }) {
   try {
+    const { page, pageSize, skip, take } = pagination(input);
     const usersWithoutCoupon = await prisma.user.findMany({
       where: { referralCoupon: null },
       select: { id: true }
     });
     await Promise.all(usersWithoutCoupon.map((user) => ensureReferralCoupon(user.id).catch(() => null)));
 
-    const coupons = await prisma.referralCoupon.findMany({
-      include: {
-        user: { select: { name: true, email: true } },
-        _count: { select: { commissions: true } }
-      },
-      orderBy: [{ active: 'desc' }, { createdAt: 'desc' }]
-    });
-    return coupons.map(serializeReferralCoupon);
+    const [coupons, total] = await prisma.$transaction([
+      prisma.referralCoupon.findMany({
+        include: {
+          user: { select: { name: true, email: true } },
+          _count: { select: { commissions: true } }
+        },
+        orderBy: [{ active: 'desc' }, { createdAt: 'desc' }],
+        skip,
+        take
+      }),
+      prisma.referralCoupon.count()
+    ]);
+    return {
+      coupons: coupons.map(serializeReferralCoupon),
+      pagination: paginationResult(page, pageSize, total)
+    };
   } catch (error) {
-    if (isMissingReferralSchemaError(error)) return [];
+    if (isMissingReferralSchemaError(error)) return { coupons: [], pagination: paginationResult(1, input.pageSize, 0) };
     throw error;
   }
 }
@@ -678,25 +705,33 @@ export async function updateAdminReferralCoupon(couponId: string, input: AdminRe
   }
 }
 
-export async function listAdminReferralCommissions() {
+export async function listAdminReferralCommissions(input: { page: number; pageSize: number }) {
   try {
-    const commissions = await prisma.referralCommission.findMany({
-      include: {
-        referrerUser: { select: { name: true, email: true } },
-        referredUser: { select: { name: true, email: true } },
-        billingPlan: { select: { name: true } },
-        referralCoupon: { select: { code: true } }
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 300
-    });
-    return commissions.map((commission) => ({
-      ...commission,
-      amount: Number(commission.amount),
-      baseAmount: Number(commission.baseAmount)
-    }));
+    const { page, pageSize, skip, take } = pagination(input);
+    const [commissions, total] = await prisma.$transaction([
+      prisma.referralCommission.findMany({
+        include: {
+          referrerUser: { select: { name: true, email: true } },
+          referredUser: { select: { name: true, email: true } },
+          billingPlan: { select: { name: true } },
+          referralCoupon: { select: { code: true } }
+        },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take
+      }),
+      prisma.referralCommission.count()
+    ]);
+    return {
+      commissions: commissions.map((commission) => ({
+        ...commission,
+        amount: Number(commission.amount),
+        baseAmount: Number(commission.baseAmount)
+      })),
+      pagination: paginationResult(page, pageSize, total)
+    };
   } catch (error) {
-    if (isMissingReferralSchemaError(error)) return [];
+    if (isMissingReferralSchemaError(error)) return { commissions: [], pagination: paginationResult(1, input.pageSize, 0) };
     throw error;
   }
 }
@@ -727,23 +762,31 @@ export async function updateAdminReferralCommission(commissionId: string, input:
   }
 }
 
-export async function listAdminReferralWithdrawals() {
+export async function listAdminReferralWithdrawals(input: { page: number; pageSize: number }) {
   try {
-    const withdrawals = await prisma.referralWithdrawal.findMany({
-      include: {
-        user: { select: { name: true, email: true } },
-        settlements: { select: { id: true } }
-      },
-      orderBy: { requestedAt: 'desc' },
-      take: 300
-    });
-    return withdrawals.map((withdrawal) => ({
-      ...withdrawal,
-      amount: Number(withdrawal.amount),
-      settlementsCount: withdrawal.settlements.length
-    }));
+    const { page, pageSize, skip, take } = pagination(input);
+    const [withdrawals, total] = await prisma.$transaction([
+      prisma.referralWithdrawal.findMany({
+        include: {
+          user: { select: { name: true, email: true } },
+          settlements: { select: { id: true } }
+        },
+        orderBy: { requestedAt: 'desc' },
+        skip,
+        take
+      }),
+      prisma.referralWithdrawal.count()
+    ]);
+    return {
+      withdrawals: withdrawals.map((withdrawal) => ({
+        ...withdrawal,
+        amount: Number(withdrawal.amount),
+        settlementsCount: withdrawal.settlements.length
+      })),
+      pagination: paginationResult(page, pageSize, total)
+    };
   } catch (error) {
-    if (isMissingReferralSchemaError(error)) return [];
+    if (isMissingReferralSchemaError(error)) return { withdrawals: [], pagination: paginationResult(1, input.pageSize, 0) };
     throw error;
   }
 }
@@ -779,14 +822,27 @@ export async function updateAdminReferralWithdrawal(withdrawalId: string, input:
   }
 }
 
-export async function listAdminMarketingBanners() {
+async function listAllAdminMarketingBanners() {
+  return prisma.marketingBanner.findMany({
+    orderBy: [{ location: 'asc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }]
+  });
+}
+
+export async function listAdminMarketingBanners(input: { page: number; pageSize: number }) {
   try {
+    const { page, pageSize, skip, take } = pagination(input);
     await ensureDefaultAdminMarketingBanner();
-    return await prisma.marketingBanner.findMany({
-      orderBy: [{ location: 'asc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }]
-    });
+    const [banners, total] = await prisma.$transaction([
+      prisma.marketingBanner.findMany({
+        orderBy: [{ location: 'asc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }],
+        skip,
+        take
+      }),
+      prisma.marketingBanner.count()
+    ]);
+    return { banners, pagination: paginationResult(page, pageSize, total) };
   } catch (error) {
-    if (isMissingReferralSchemaError(error)) return [];
+    if (isMissingReferralSchemaError(error)) return { banners: [], pagination: paginationResult(1, input.pageSize, 0) };
     throw error;
   }
 }
@@ -847,7 +903,7 @@ export async function reorderAdminMarketingBanners(input: MarketingBannerOrderIn
         })
       )
     );
-    return listAdminMarketingBanners();
+    return listAllAdminMarketingBanners();
   } catch (error) {
     if (isMissingReferralSchemaError(error)) throw referralSchemaUnavailableError();
     throw error;

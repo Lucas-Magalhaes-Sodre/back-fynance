@@ -228,15 +228,35 @@ export async function listFinancialCategories(userId: string, filters: ListFinan
   await ensureSavingsRedemptionIncomeCategory(userId);
   await ensureCreditCardExpenseCategory(userId);
   await ensureBirthdayExpenseCategory(userId);
-  const categories = await prisma.financialCategory.findMany({
-    where: {
-      userId,
-      type: filters.type ? normalizeType(filters.type) : undefined
-    },
-    orderBy: [{ type: 'asc' }, { name: 'asc' }]
-  });
+  const where = {
+    userId,
+    type: filters.type ? normalizeType(filters.type) : undefined
+  };
+  const page = filters.page ? Math.max(1, filters.page) : null;
+  const pageSize = filters.pageSize ? Math.min(100, Math.max(1, filters.pageSize)) : null;
+  const shouldPaginate = Boolean(page && pageSize);
 
-  return categories.map(serializeCategory);
+  const [categories, total] = await prisma.$transaction([
+    prisma.financialCategory.findMany({
+      where,
+      orderBy: [{ type: 'asc' }, { name: 'asc' }],
+      skip: shouldPaginate ? ((page ?? 1) - 1) * (pageSize ?? 10) : undefined,
+      take: shouldPaginate ? pageSize ?? 10 : undefined
+    }),
+    shouldPaginate ? prisma.financialCategory.count({ where }) : prisma.financialCategory.count({ where })
+  ]);
+
+  return {
+    categories: categories.map(serializeCategory),
+    pagination: shouldPaginate
+      ? {
+        page: page ?? 1,
+        pageSize: pageSize ?? 10,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / (pageSize ?? 10)))
+      }
+      : undefined
+  };
 }
 
 export async function createFinancialCategory(userId: string, input: FinancialCategoryInput) {
