@@ -271,22 +271,41 @@ async function assertGoalOwnership(userId: string, goalId?: string | null) {
 }
 
 export async function listSavings(userId: string, filters: ListSavingsInput) {
-  const savings = await prisma.savings.findMany({
-    where: {
-      userId,
-      month: filters.month,
-      year: filters.year,
-      category: filters.category,
-      goalId: filters.goalId,
-      date: {
-        gte: filters.startDate,
-        lte: filters.endDate
-      }
-    },
-    orderBy: [{ date: 'desc' }, { createdAt: 'desc' }]
-  });
+  const where = {
+    userId,
+    month: filters.month,
+    year: filters.year,
+    category: filters.category,
+    goalId: filters.goalId,
+    date: {
+      gte: filters.startDate,
+      lte: filters.endDate
+    }
+  };
+  const page = filters.page ? Math.max(1, filters.page) : null;
+  const pageSize = filters.pageSize ? Math.min(100, Math.max(1, filters.pageSize)) : null;
+  const shouldPaginate = Boolean(page && pageSize);
+  const [savings, total] = await prisma.$transaction([
+    prisma.savings.findMany({
+      where,
+      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+      skip: shouldPaginate ? ((page ?? 1) - 1) * (pageSize ?? 10) : undefined,
+      take: shouldPaginate ? pageSize ?? 10 : undefined
+    }),
+    shouldPaginate ? prisma.savings.count({ where }) : prisma.savings.count({ where })
+  ]);
 
-  return savings.map(serializeSaving);
+  return {
+    savings: savings.map(serializeSaving),
+    pagination: shouldPaginate
+      ? {
+        page: page ?? 1,
+        pageSize: pageSize ?? 10,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / (pageSize ?? 10)))
+      }
+      : undefined
+  };
 }
 
 export async function createSaving(userId: string, input: CreateSavingInput) {

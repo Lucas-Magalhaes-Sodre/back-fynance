@@ -47,7 +47,8 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
       accessBlockedAt: true,
       subscriptionPlan: true,
       subscriptionCurrentPeriodEnd: true,
-      planProductKeysSnapshot: true
+      planProductKeysSnapshot: true,
+      lastSeenAt: true
     }
   });
 
@@ -74,5 +75,13 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
       productKey: productKey[0],
       access
     });
+  }
+
+  const fifteenMinutesAgo = Date.now() - 15 * 60 * 1000;
+  if (!user.lastSeenAt || user.lastSeenAt.getTime() < fifteenMinutesAgo) {
+    prisma.user.update({
+      where: { id: request.user.sub },
+      data: { lastSeenAt: new Date() }
+    }).catch(() => null);
   }
 }

@@ -38,7 +38,9 @@ export const listSavingsSchema = z.object({
   month: z.coerce.number().int().min(1).max(12).optional(),
   year: z.coerce.number().int().min(1900).max(3000).optional(),
   category: z.string().optional(),
-  goalId: z.string().uuid().optional()
+  goalId: z.string().uuid().optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.coerce.number().int().min(1).max(100).optional()
 });
 
 export const savingsDeleteGroupSchema = z.object({

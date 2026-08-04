@@ -56,6 +56,7 @@ const userSelect = {
   couponDiscountSnapshot: true,
   subscriptionCurrentPeriodEnd: true,
   lastPaymentAt: true,
+  lastSeenAt: true,
   createdAt: true,
   updatedAt: true
 };
@@ -93,6 +94,11 @@ function dateOnly(value?: Date | null) {
 }
 
 export async function meController(request: FastifyRequest, reply: FastifyReply) {
+  await prisma.user.update({
+    where: { id: request.user.sub },
+    data: { lastSeenAt: new Date() }
+  }).catch(() => null);
+
   const user = await prisma.user.findUnique({
     where: { id: request.user.sub },
     select: userSelect

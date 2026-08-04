@@ -106,6 +106,12 @@ function addDays(date: Date, days: number) {
   return next;
 }
 
+function addMonths(date: Date, months: number) {
+  const next = new Date(date);
+  next.setMonth(next.getMonth() + months);
+  return next;
+}
+
 function assertMercadoPagoWebhookSignature(input: {
   body: Record<string, any>;
   query: Record<string, unknown>;
@@ -368,6 +374,102 @@ export async function createCheckout(
   }
 
   const frequency = Math.max(1, plan.durationMonths);
+  const externalReference = `${user.id}:${plan.id}:${coupon?.kind ?? ''}:${coupon?.id ?? ''}`;
+  const appUrl = resolveWebAppUrl();
+  const checkoutTitle = `Deluket Finance - ${plan.name}${coupon ? ` - cupom ${coupon.code}` : ''}${referralCredit.amount ? ' - credito de indicacao' : ''}`;
+
+  if (input.paymentMethod === 'PIX') {
+    const response = await fetch(`${mercadoPagoApiUrl}/checkout/preferences`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${env.MERCADO_PAGO_ACCESS_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        items: [
+          {
+            id: plan.id,
+            title: checkoutTitle,
+            quantity: 1,
+            unit_price: discount.finalPrice,
+            currency_id: 'BRL'
+          }
+        ],
+        payer: {
+          email: user.email
+        },
+        external_reference: externalReference,
+        back_urls: {
+          success: `${appUrl}/app/billing?payment=success`,
+          pending: `${appUrl}/app/billing?payment=pending`,
+          failure: `${appUrl}/app/billing?payment=failure`
+        },
+        payment_methods: {
+          excluded_payment_types: [
+            { id: 'credit_card' },
+            { id: 'debit_card' },
+            { id: 'ticket' },
+            { id: 'atm' }
+          ],
+          installments: 1
+        }
+      })
+    });
+
+    const data = await response.json() as { id?: string; init_point?: string; message?: string };
+    if (!response.ok || !data.init_point) {
+      const error = new Error(data.message ?? 'Nao foi possivel criar checkout Pix no Mercado Pago') as Error & { statusCode: number };
+      error.statusCode = 400;
+      throw error;
+    }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        paymentProvider: 'MERCADO_PAGO',
+        providerSubscriptionId: data.id ?? null,
+        subscriptionStatus: 'PAST_DUE',
+        subscriptionPlan: legacyCode,
+        billingPlanId: plan.id,
+        planNameSnapshot: plan.name,
+        planPriceSnapshot: discount.finalPrice,
+        planDurationMonthsSnapshot: plan.durationMonths,
+        planProductKeysSnapshot: normalizePlanProductKeys(plan.productKeys),
+        planProductLabelsSnapshot: normalizePlanProductLabels(plan.productLabels),
+        planIncludedItemsSnapshot: normalizePlanIncludedItems(plan.includedItems),
+        couponCodeSnapshot: coupon?.code,
+        couponDiscountSnapshot: coupon ? discount.discountAmount : null
+      }
+    });
+
+    await recordSubscriptionTermsAcceptance({
+      userId: user.id,
+      plan,
+      originalPrice,
+      discount,
+      couponCode: coupon?.code,
+      provider: 'MERCADO_PAGO',
+      metadata
+    });
+
+    if (coupon?.kind === 'PROMOTIONAL') {
+      await prisma.billingCoupon.update({ where: { id: coupon.id }, data: { usedCount: { increment: 1 } } });
+    }
+
+    return {
+      provider: input.provider,
+      paymentMethod: input.paymentMethod,
+      planId: plan.id,
+      planName: plan.name,
+      originalPrice,
+      discountAmount: discount.discountAmount,
+      finalPrice: discount.finalPrice,
+      couponCode: coupon?.code ?? null,
+      referralCreditAmount: referralCredit.amount,
+      url: data.init_point
+    };
+  }
+
   const response = await fetch(`${mercadoPagoApiUrl}/preapproval`, {
     method: 'POST',
     headers: {
@@ -375,10 +477,10 @@ export async function createCheckout(
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      reason: `Deluket Finance - ${plan.name}${coupon ? ` - cupom ${coupon.code}` : ''}${referralCredit.amount ? ' - credito de indicacao' : ''}`,
-      external_reference: `${user.id}:${plan.id}:${coupon?.kind ?? ''}:${coupon?.id ?? ''}`,
+      reason: checkoutTitle,
+      external_reference: externalReference,
       payer_email: user.email,
-      back_url: `${resolveWebAppUrl()}/app/billing`,
+      back_url: `${appUrl}/app/billing`,
       auto_recurring: {
         frequency,
         frequency_type: 'months',
@@ -432,6 +534,7 @@ export async function createCheckout(
 
   return {
     provider: input.provider,
+    paymentMethod: input.paymentMethod,
     planId: plan.id,
     planName: plan.name,
     originalPrice,
@@ -514,6 +617,7 @@ export async function processMercadoPagoWebhook(payload: unknown, query: Record<
   const finalPrice = providerAmount !== undefined ? Number(providerAmount) : plan ? Number(plan.price) : undefined;
   const originalPrice = plan ? Number(plan.price) : finalPrice;
   const discountAmount = coupon && originalPrice !== undefined && finalPrice !== undefined ? Math.max(0, originalPrice - finalPrice) : undefined;
+  const periodEnd = approvedPayment ? addMonths(new Date(), Math.max(1, durationMonths)) : undefined;
   await prisma.user.update({
     where: { id: userId },
     data: {
@@ -530,6 +634,7 @@ export async function processMercadoPagoWebhook(payload: unknown, query: Record<
       planIncludedItemsSnapshot: normalizePlanIncludedItems(plan?.includedItems),
       couponCodeSnapshot: coupon?.code,
       couponDiscountSnapshot: discountAmount,
+      subscriptionCurrentPeriodEnd: periodEnd,
       lastPaymentAt: approvedPayment ? new Date() : undefined,
       accessBlockedAt: approvedPayment || status === 'ACTIVE' ? null : undefined
     }

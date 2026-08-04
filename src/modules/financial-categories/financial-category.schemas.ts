@@ -9,7 +9,9 @@ export const financialCategorySchema = z.object({
 });
 
 export const listFinancialCategoriesSchema = z.object({
-  type: financialCategoryTypeSchema.optional()
+  type: financialCategoryTypeSchema.optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.coerce.number().int().min(1).max(100).optional()
 });
 
 export const updateFinancialCategorySchema = financialCategorySchema.partial();

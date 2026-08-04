@@ -16,8 +16,8 @@ const idParamsSchema = z.object({ id: z.string().min(1) });
 
 export async function listFinancialCategoriesController(request: FastifyRequest, reply: FastifyReply) {
   const filters = listFinancialCategoriesSchema.parse(request.query);
-  const categories = await listFinancialCategories(request.user.sub, filters);
-  return reply.send({ categories });
+  const result = await listFinancialCategories(request.user.sub, filters);
+  return reply.send(result.pagination ? result : { categories: result.categories });
 }
 
 export async function createFinancialCategoryController(request: FastifyRequest, reply: FastifyReply) {
