@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const checkoutSchema = z.object({
   provider: z.enum(['MERCADO_PAGO', 'STRIPE']).default('MERCADO_PAGO'),
+  paymentMethod: z.enum(['CARD', 'PIX']).default('CARD'),
   planId: z.string().min(1).optional(),
   plan: z.enum(['MONTHLY', 'YEARLY']).optional(),
   couponCode: z.string().trim().max(40).optional(),
