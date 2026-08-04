@@ -11,6 +11,28 @@ import type { CheckoutInput, CouponValidationInput } from './billing.schemas.js'
 
 const mercadoPagoApiUrl = 'https://api.mercadopago.com';
 
+function resolveWebAppUrl() {
+  const origin = env.WEB_ORIGIN.split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .find((item) => {
+      try {
+        const url = new URL(item);
+        return url.protocol === 'http:' || url.protocol === 'https:';
+      } catch {
+        return false;
+      }
+    });
+
+  if (!origin) {
+    const error = new Error('WEB_ORIGIN precisa conter pelo menos uma URL valida do front.') as Error & { statusCode: number };
+    error.statusCode = 500;
+    throw error;
+  }
+
+  return origin.replace(/\/+$/, '');
+}
+
 function publicPlan(plan: {
   id: string;
   name: string;
@@ -321,7 +343,7 @@ export async function createCheckout(
       finalPrice: discount.finalPrice,
       couponCode: coupon?.code ?? null,
       referralCreditAmount: referralCredit.amount,
-      url: `${env.WEB_ORIGIN}/app/billing`
+      url: `${resolveWebAppUrl()}/app/billing`
     };
   }
   const configuredPlanUrl =
@@ -356,7 +378,7 @@ export async function createCheckout(
       reason: `Deluket Finance - ${plan.name}${coupon ? ` - cupom ${coupon.code}` : ''}${referralCredit.amount ? ' - credito de indicacao' : ''}`,
       external_reference: `${user.id}:${plan.id}:${coupon?.kind ?? ''}:${coupon?.id ?? ''}`,
       payer_email: user.email,
-      back_url: `${env.WEB_ORIGIN}/app/billing`,
+      back_url: `${resolveWebAppUrl()}/app/billing`,
       auto_recurring: {
         frequency,
         frequency_type: 'months',
