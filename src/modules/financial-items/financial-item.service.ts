@@ -108,11 +108,34 @@ function creditCardInstallmentNumberForMonth(
   return installmentIndex + 1;
 }
 
+function creditCardInstallmentAmountForMonth(
+  purchase: { amount: Prisma.Decimal; purchaseDate: Date; installments: number; skippedInstallments?: number[] },
+  month: number,
+  year: number
+) {
+  const installmentNumber = creditCardInstallmentNumberForMonth(purchase, month, year);
+  if (!installmentNumber) return 0;
+  return toNumber(purchase.amount) / Math.max(1, purchase.installments);
+}
+
 function isCreditCardExpenseCategory(category?: string | null, type?: FinancialItemType | 'INCOME' | 'EXPENSE' | 'INVESTMENT') {
   const normalizedType = String(type ?? '');
   if (normalizedType && normalizedType !== FinancialItemType.EXPENSE) return false;
   const normalizedCategory = normalizeCategoryName(category ?? '');
   return normalizedCategory === 'cartao de credito' || normalizedCategory === 'cartoes de credito' || normalizedCategory === 'cartoes';
+}
+
+function creditCardAutoGroupId(cardId: string, year: number, month: number) {
+  return `CREDIT_CARD_AUTO:${cardId}:${year}:${month}`;
+}
+
+function creditCardManualGroupId(cardId: string, year: number, month: number) {
+  return `CREDIT_CARD_MANUAL:${cardId}:${year}:${month}`;
+}
+
+function creditCardIdFromAutoGroup(groupId?: string | null) {
+  if (!groupId?.startsWith('CREDIT_CARD_AUTO:')) return null;
+  return groupId.split(':')[1] || null;
 }
 
 async function removeCreditCardPurchaseInstallmentsForYear(
@@ -1047,6 +1070,190 @@ async function upsertCreditCardPaymentLink(userId: string, item: Item, input: Up
   };
 }
 
+async function updateCreditCardStatementTotal(userId: string, existing: Item, input: UpdateFinancialItemValueInput) {
+  const autoCardId = creditCardIdFromAutoGroup(existing.recurrenceGroupId);
+  const card = autoCardId
+    ? await prisma.creditCard.findFirst({ where: { id: autoCardId, userId } })
+    : await prisma.creditCard.findFirst({
+        where: {
+          userId,
+          name: { equals: existing.name, mode: Prisma.QueryMode.insensitive }
+        }
+      });
+
+  if (!card) {
+    const error = new Error('Cartao nao encontrado para atualizar a fatura') as Error & { statusCode: number };
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const months = boundedTargetMonths(existing.month, input.scope, input.endMonth);
+  const purchases = await prisma.creditCardPurchase.findMany({
+    where: {
+      userId,
+      cardId: card.id
+    }
+  });
+
+  await prisma.$transaction(async (tx) => {
+    for (const month of months) {
+      const detailedAmount = purchases.reduce(
+        (sum, purchase) => sum + creditCardInstallmentAmountForMonth(purchase, month, existing.year),
+        0
+      );
+      const manualAmount = Math.max(input.amount - detailedAmount, 0);
+      const occurrenceDate = dateForMonthlyOccurrence(existing.year, month, card.dueDay);
+      const autoGroupId = creditCardAutoGroupId(card.id, existing.year, month);
+      const manualGroupId = creditCardManualGroupId(card.id, existing.year, month);
+
+      const autoItem = await tx.financialItem.findFirst({
+        where: {
+          userId,
+          type: FinancialItemType.EXPENSE,
+          category: existing.category,
+          name: card.name,
+          year: existing.year,
+          month,
+          recurrenceGroupId: autoGroupId
+        }
+      });
+
+      if (detailedAmount > 0) {
+        const autoData = {
+          title: card.name,
+          name: card.name,
+          description: 'Gerado automaticamente pelo detalhamento do cartao',
+          amount: detailedAmount,
+          type: FinancialItemType.EXPENSE,
+          category: existing.category,
+          dueDate: occurrenceDate,
+          paymentDate: null,
+          status: PaymentStatus.PENDENTE,
+          dueDay: card.dueDay,
+          isFixed: false,
+          recurrenceType: RecurrenceType.NONE,
+          recurrenceGroupId: autoGroupId,
+          date: occurrenceDate,
+          month,
+          year: existing.year
+        };
+
+        if (autoItem) {
+          await tx.financialItem.update({
+            where: { id: autoItem.id },
+            data: autoData
+          });
+        } else {
+          await tx.financialItem.create({
+            data: {
+              userId,
+              ...autoData
+            }
+          });
+        }
+      } else if (autoItem) {
+        await tx.financialItem.delete({ where: { id: autoItem.id } });
+      }
+
+      const manualItems = await tx.financialItem.findMany({
+        where: {
+          userId,
+          type: FinancialItemType.EXPENSE,
+          category: existing.category,
+          name: card.name,
+          year: existing.year,
+          month,
+          NOT: { recurrenceGroupId: autoGroupId }
+        },
+        orderBy: [{ recurrenceGroupId: 'desc' }, { createdAt: 'asc' }]
+      });
+      const primaryManual =
+        manualItems.find((item) => item.recurrenceGroupId === manualGroupId) ??
+        manualItems.find((item) => !item.recurrenceGroupId) ??
+        manualItems[0];
+      const duplicateManuals = manualItems.filter((item) => item.id !== primaryManual?.id);
+
+      if (duplicateManuals.length) {
+        await tx.financialItem.deleteMany({
+          where: { id: { in: duplicateManuals.map((item) => item.id) } }
+        });
+      }
+
+      if (manualAmount <= 0) {
+        if (primaryManual) {
+          await tx.financialItem.delete({ where: { id: primaryManual.id } });
+        }
+        continue;
+      }
+
+      const manualData = {
+        title: card.name,
+        name: card.name,
+        description: input.description ?? 'Outros gastos da fatura do cartao',
+        amount: manualAmount,
+        type: FinancialItemType.EXPENSE,
+        category: existing.category,
+        dueDate: occurrenceDate,
+        paymentDate: null,
+        status: PaymentStatus.PENDENTE,
+        dueDay: card.dueDay,
+        isFixed: false,
+        recurrenceType: RecurrenceType.NONE,
+        recurrenceGroupId: manualGroupId,
+        date: occurrenceDate,
+        month,
+        year: existing.year
+      };
+
+      if (primaryManual) {
+        await tx.financialItem.update({
+          where: { id: primaryManual.id },
+          data: manualData
+        });
+      } else {
+        await tx.financialItem.create({
+          data: {
+            userId,
+            ...manualData
+          }
+        });
+      }
+    }
+  });
+
+  const touchedItems = await prisma.financialItem.findMany({
+    where: {
+      userId,
+      type: FinancialItemType.EXPENSE,
+      category: existing.category,
+      name: card.name,
+      year: existing.year,
+      month: { in: months }
+    },
+    orderBy: [{ date: 'asc' }, { createdAt: 'asc' }]
+  });
+  const yearItems = await prisma.financialItem.findMany({ where: { userId, year: existing.year } });
+  const monthItems = yearItems.filter((item) => item.month === existing.month);
+
+  const summarize = (items: typeof yearItems) => {
+    const calculationItems = items.filter((item) => !item.excludedFromTotals);
+    const totalIncome = calculationItems
+      .filter((item) => item.type === FinancialItemType.INCOME)
+      .reduce((sum, item) => sum + toNumber(item.amount), 0);
+    const totalExpense = calculationItems
+      .filter((item) => item.type === FinancialItemType.EXPENSE)
+      .reduce((sum, item) => sum + toNumber(item.amount), 0);
+    return { totalIncome, totalExpense, balance: totalIncome - totalExpense };
+  };
+
+  return {
+    items: touchedItems.map(serializeItem),
+    changedCount: touchedItems.length,
+    monthSummary: summarize(monthItems),
+    yearSummary: summarize(yearItems)
+  };
+}
+
 export async function updateFinancialItemValue(userId: string, id: string, input: UpdateFinancialItemValueInput) {
   const existing = await prisma.financialItem.findFirst({ where: { id, userId } });
   if (!existing) {
@@ -1058,6 +1265,13 @@ export async function updateFinancialItemValue(userId: string, id: string, input
     type: existing.type,
     category: existing.category
   });
+
+  if (
+    input.paidWithCreditCard === undefined &&
+    isCreditCardExpenseCategory(existing.category, existing.type)
+  ) {
+    return updateCreditCardStatementTotal(userId, existing, input);
+  }
 
   const creditCardLinkData = input.paidWithCreditCard === true
     ? await upsertCreditCardPaymentLink(userId, existing, input)
