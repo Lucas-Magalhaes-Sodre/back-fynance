@@ -1165,7 +1165,10 @@ async function updateCreditCardStatementTotal(userId: string, existing: CreditCa
           name: card.name,
           year: existing.year,
           month,
-          NOT: { recurrenceGroupId: autoGroupId }
+          OR: [
+            { recurrenceGroupId: null },
+            { recurrenceGroupId: { not: autoGroupId } }
+          ]
         },
         orderBy: [{ recurrenceGroupId: 'desc' }, { createdAt: 'asc' }]
       });
