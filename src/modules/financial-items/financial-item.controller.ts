@@ -10,6 +10,7 @@ import {
   paymentSummarySchema,
   renameCategorySchema,
   salaryCandidatesSchema,
+  updateCreditCardStatementValueSchema,
   updateFinancialItemValueSchema,
   updateFinancialItemSchema
 } from './financial-item.schemas.js';
@@ -24,6 +25,7 @@ import {
   listFinancialItems,
   listSalaryCandidates,
   renameFinancialCategory,
+  updateCreditCardStatementValue,
   updateFinancialItem,
   updateFinancialItemPaymentStatus,
   updateFinancialItemValue
@@ -79,6 +81,12 @@ export async function updateFinancialItemValueController(request: FastifyRequest
   const { id } = idParamsSchema.parse(request.params);
   const data = updateFinancialItemValueSchema.parse(request.body);
   const result = await updateFinancialItemValue(request.user.sub, id, data);
+  return reply.send(result);
+}
+
+export async function updateCreditCardStatementValueController(request: FastifyRequest, reply: FastifyReply) {
+  const data = updateCreditCardStatementValueSchema.parse(request.body);
+  const result = await updateCreditCardStatementValue(request.user.sub, data);
   return reply.send(result);
 }
 
