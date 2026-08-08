@@ -13,6 +13,7 @@ import {
   salaryCandidatesController,
   updateCreditCardStatementValueController,
   updateFinancialItemController,
+  updateFinancialItemMonthlyValuesController,
   updateFinancialItemPaymentStatusController,
   updateFinancialItemValueController
 } from './financial-item.controller.js';
@@ -30,6 +31,7 @@ export async function financialItemRoutes(app: FastifyInstance) {
   app.get('/salary-candidates', salaryCandidatesController);
   app.patch('/credit-card-statement/value', updateCreditCardStatementValueController);
   app.patch('/:id/payment-status', updateFinancialItemPaymentStatusController);
+  app.patch('/:id/month-values', updateFinancialItemMonthlyValuesController);
   app.patch('/:id/value', updateFinancialItemValueController);
   app.put('/:id', updateFinancialItemController);
   app.delete('/:id', deleteFinancialItemController);

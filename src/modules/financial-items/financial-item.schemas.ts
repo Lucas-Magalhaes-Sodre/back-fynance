@@ -92,6 +92,17 @@ export const updateFinancialItemValueSchema = z.object({
   path: ['amount']
 });
 
+export const monthlyValueSchema = z.object({
+  month: z.coerce.number().int().min(1).max(12),
+  amount: nonnegativeMoneySchema
+});
+
+export const updateFinancialItemMonthlyValuesSchema = z.object({
+  year: z.coerce.number().int().min(1900).max(3000),
+  description: z.string().optional().nullable(),
+  values: z.array(monthlyValueSchema).min(1).max(12)
+});
+
 export const updateCreditCardStatementValueSchema = z.object({
   amount: nonnegativeMoneySchema,
   date: z.coerce.date(),
@@ -173,6 +184,7 @@ export type SalaryCandidatesInput = z.infer<typeof salaryCandidatesSchema>;
 export type CopyFinancialCategoryInput = z.infer<typeof copyFinancialCategorySchema>;
 export type BulkDeleteFinancialScopeInput = z.infer<typeof bulkDeleteFinancialScopeSchema>;
 export type UpdateFinancialItemValueInput = z.infer<typeof updateFinancialItemValueSchema>;
+export type UpdateFinancialItemMonthlyValuesInput = z.infer<typeof updateFinancialItemMonthlyValuesSchema>;
 export type UpdateCreditCardStatementValueInput = z.infer<typeof updateCreditCardStatementValueSchema>;
 export type PaymentStatusUpdateInput = z.infer<typeof paymentStatusUpdateSchema>;
 export type PaymentSummaryInput = z.infer<typeof paymentSummarySchema>;
