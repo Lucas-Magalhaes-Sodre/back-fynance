@@ -10,6 +10,7 @@ import {
   paymentSummarySchema,
   renameCategorySchema,
   salaryCandidatesSchema,
+  updateFinancialItemMonthlyValuesSchema,
   updateCreditCardStatementValueSchema,
   updateFinancialItemValueSchema,
   updateFinancialItemSchema
@@ -27,6 +28,7 @@ import {
   renameFinancialCategory,
   updateCreditCardStatementValue,
   updateFinancialItem,
+  updateFinancialItemMonthlyValues,
   updateFinancialItemPaymentStatus,
   updateFinancialItemValue
 } from './financial-item.service.js';
@@ -81,6 +83,13 @@ export async function updateFinancialItemValueController(request: FastifyRequest
   const { id } = idParamsSchema.parse(request.params);
   const data = updateFinancialItemValueSchema.parse(request.body);
   const result = await updateFinancialItemValue(request.user.sub, id, data);
+  return reply.send(result);
+}
+
+export async function updateFinancialItemMonthlyValuesController(request: FastifyRequest, reply: FastifyReply) {
+  const { id } = idParamsSchema.parse(request.params);
+  const data = updateFinancialItemMonthlyValuesSchema.parse(request.body);
+  const result = await updateFinancialItemMonthlyValues(request.user.sub, id, data);
   return reply.send(result);
 }
 

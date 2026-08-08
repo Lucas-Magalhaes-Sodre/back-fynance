@@ -17,6 +17,7 @@ import type {
   RenameCategoryInput,
   UpdateCreditCardStatementValueInput,
   SalaryCandidatesInput,
+  UpdateFinancialItemMonthlyValuesInput,
   UpdateFinancialItemValueInput,
   UpdateFinancialItemInput
 } from './financial-item.schemas.js';
@@ -1281,6 +1282,152 @@ export async function updateCreditCardStatementValue(
     },
     input
   );
+}
+
+export async function updateFinancialItemMonthlyValues(
+  userId: string,
+  id: string,
+  input: UpdateFinancialItemMonthlyValuesInput
+) {
+  const existing = await prisma.financialItem.findFirst({ where: { id, userId } });
+  if (!existing) {
+    const error = new Error('Registro financeiro nao encontrado') as Error & { statusCode: number };
+    error.statusCode = 404;
+    throw error;
+  }
+  assertNotManualSavingsRedemption({
+    type: existing.type,
+    category: existing.category
+  });
+
+  const values = Array.from(
+    new Map(input.values.map((item) => [item.month, item.amount])).entries()
+  ).map(([month, amount]) => ({ month, amount }));
+
+  if (isCreditCardExpenseCategory(existing.category, existing.type)) {
+    for (const value of values) {
+      await updateCreditCardStatementTotal(userId, { ...existing, year: input.year, month: value.month }, {
+        amount: value.amount,
+        date: dateForMonthlyOccurrence(input.year, value.month, existing.dueDay ?? existing.date.getDate()),
+        scope: 'ONLY_THIS_PERIOD',
+        periodType: 'MONTH',
+        description: input.description ?? existing.description
+      });
+    }
+  } else {
+    const occurrenceDay = existing.dueDay ?? existing.dueDate?.getDate() ?? existing.date.getDate();
+    const recurrenceGroupId =
+      existing.recurrenceGroupId ?? `${userId}:${existing.type}:${existing.category}:${existing.name}:${input.year}`;
+
+    await prisma.$transaction(async (tx) => {
+      for (const value of values) {
+        const monthItems = await tx.financialItem.findMany({
+          where: {
+            userId,
+            type: existing.type,
+            category: existing.category,
+            name: existing.name,
+            year: input.year,
+            month: value.month,
+            OR: [
+              { recurrenceGroupId },
+              { recurrenceGroupId: existing.recurrenceGroupId },
+              { recurrenceGroupId: null }
+            ]
+          },
+          orderBy: [{ date: 'asc' }, { createdAt: 'asc' }]
+        });
+        const [primary, ...duplicates] = monthItems;
+
+        if (value.amount <= 0) {
+          if (monthItems.length) {
+            await tx.financialItem.deleteMany({
+              where: { id: { in: monthItems.map((item) => item.id) } }
+            });
+          }
+          continue;
+        }
+
+        const occurrenceDate = dateForMonthlyOccurrence(input.year, value.month, occurrenceDay);
+        const dueDate = isExpenseType(existing.type) ? occurrenceDate : null;
+        const data = {
+          title: existing.title,
+          name: existing.name,
+          description: input.description ?? existing.description,
+          amount: value.amount,
+          type: existing.type,
+          category: existing.category,
+          dueDate,
+          paymentDate: null,
+          status: normalizeStatus(existing.type, dueDate, null, existing.status),
+          dueDay: existing.dueDay ?? (isExpenseType(existing.type) ? occurrenceDay : null),
+          isFixed: existing.isFixed || existing.recurrenceType !== RecurrenceType.NONE || Boolean(existing.recurrenceGroupId),
+          recurrenceType: existing.recurrenceType !== RecurrenceType.NONE
+            ? existing.recurrenceType
+            : RecurrenceType.MONTHLY,
+          recurrenceGroupId,
+          excludedFromTotals: false,
+          linkedCreditCardId: null,
+          linkedCreditCardPurchaseId: null,
+          linkedCreditCardInstallments: null,
+          linkedCreditCardAmount: null,
+          date: occurrenceDate,
+          month: value.month,
+          year: input.year
+        };
+
+        if (primary) {
+          await tx.financialItem.update({
+            where: { id: primary.id },
+            data
+          });
+        } else {
+          await tx.financialItem.create({
+            data: {
+              userId,
+              ...data
+            }
+          });
+        }
+
+        if (duplicates.length) {
+          await tx.financialItem.deleteMany({
+            where: { id: { in: duplicates.map((item) => item.id) } }
+          });
+        }
+      }
+    });
+  }
+
+  const touchedItems = await prisma.financialItem.findMany({
+    where: {
+      userId,
+      type: existing.type,
+      category: existing.category,
+      name: existing.name,
+      year: input.year,
+      month: { in: values.map((value) => value.month) }
+    },
+    orderBy: [{ date: 'asc' }, { createdAt: 'asc' }]
+  });
+  const yearItems = await prisma.financialItem.findMany({ where: { userId, year: input.year } });
+
+  const summarize = (items: typeof yearItems) => {
+    const calculationItems = items.filter((item) => !item.excludedFromTotals);
+    const totalIncome = calculationItems
+      .filter((item) => item.type === FinancialItemType.INCOME)
+      .reduce((sum, item) => sum + toNumber(item.amount), 0);
+    const totalExpense = calculationItems
+      .filter((item) => item.type === FinancialItemType.EXPENSE)
+      .reduce((sum, item) => sum + toNumber(item.amount), 0);
+    return { totalIncome, totalExpense, balance: totalIncome - totalExpense };
+  };
+
+  return {
+    items: touchedItems.map(serializeItem),
+    changedCount: touchedItems.length,
+    yearSummary: summarize(yearItems)
+  };
 }
 
 export async function updateFinancialItemValue(userId: string, id: string, input: UpdateFinancialItemValueInput) {
