@@ -15,12 +15,14 @@ import type {
   PaymentSummaryInput,
   PaymentStatusUpdateInput,
   RenameCategoryInput,
+  UpdateCreditCardStatementValueInput,
   SalaryCandidatesInput,
   UpdateFinancialItemValueInput,
   UpdateFinancialItemInput
 } from './financial-item.schemas.js';
 
 type Item = Awaited<ReturnType<typeof prisma.financialItem.findMany>>[number];
+type CreditCardStatementTarget = Pick<Item, 'category' | 'name' | 'year' | 'month' | 'type' | 'recurrenceGroupId'>;
 
 const salarySearchTerms = [
   'salario',
@@ -1070,7 +1072,7 @@ async function upsertCreditCardPaymentLink(userId: string, item: Item, input: Up
   };
 }
 
-async function updateCreditCardStatementTotal(userId: string, existing: Item, input: UpdateFinancialItemValueInput) {
+async function updateCreditCardStatementTotal(userId: string, existing: CreditCardStatementTarget, input: UpdateFinancialItemValueInput) {
   const autoCardId = creditCardIdFromAutoGroup(existing.recurrenceGroupId);
   const card = autoCardId
     ? await prisma.creditCard.findFirst({ where: { id: autoCardId, userId } })
@@ -1189,7 +1191,7 @@ async function updateCreditCardStatementTotal(userId: string, existing: Item, in
       const manualData = {
         title: card.name,
         name: card.name,
-        description: input.description ?? 'Outros gastos da fatura do cartao',
+        description: input.description ?? null,
         amount: manualAmount,
         type: FinancialItemType.EXPENSE,
         category: existing.category,
@@ -1252,6 +1254,30 @@ async function updateCreditCardStatementTotal(userId: string, existing: Item, in
     monthSummary: summarize(monthItems),
     yearSummary: summarize(yearItems)
   };
+}
+
+export async function updateCreditCardStatementValue(
+  userId: string,
+  input: UpdateCreditCardStatementValueInput
+) {
+  if (!isCreditCardExpenseCategory(input.category, FinancialItemType.EXPENSE)) {
+    const error = new Error('Categoria de cartao invalida para atualizar fatura') as Error & { statusCode: number };
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return updateCreditCardStatementTotal(
+    userId,
+    {
+      category: input.category,
+      name: input.name,
+      year: input.year,
+      month: input.month,
+      type: FinancialItemType.EXPENSE,
+      recurrenceGroupId: null
+    },
+    input
+  );
 }
 
 export async function updateFinancialItemValue(userId: string, id: string, input: UpdateFinancialItemValueInput) {
