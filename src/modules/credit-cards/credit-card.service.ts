@@ -86,13 +86,6 @@ function installmentForMonth(
   };
 }
 
-function activePurchaseAmount(purchase: { amount: Prisma.Decimal; installments: number; skippedInstallments?: number[] }) {
-  const installments = Math.max(1, purchase.installments);
-  const skipped = purchase.skippedInstallments?.length ?? 0;
-  const activeInstallments = Math.max(0, installments - skipped);
-  return (toNumber(purchase.amount) / installments) * activeInstallments;
-}
-
 function periodsForPurchase(purchase: { purchaseDate: Date; installments: number }) {
   const periods: Array<{ year: number; month: number }> = [];
   const startYear = purchase.purchaseDate.getFullYear();
@@ -238,21 +231,32 @@ export async function listCreditCards(userId: string, filters: ListCreditCardsIn
     await syncCardFinancialPeriods(userId, card.id, periods);
   }
 
-  const statementItems = await prisma.financialItem.findMany({
-    where: {
-      userId,
-      type: FinancialItemType.EXPENSE,
-      category: { in: CREDIT_CARD_CATEGORIES },
-      year
-    }
-  });
+  const statementItems = cards.length
+    ? await prisma.financialItem.findMany({
+        where: {
+          userId,
+          type: FinancialItemType.EXPENSE,
+          category: { in: CREDIT_CARD_CATEGORIES },
+          OR: cards.map((card) => ({
+            name: { equals: card.name, mode: Prisma.QueryMode.insensitive }
+          }))
+        }
+      })
+    : [];
+  const selectedYearStatementItems = statementItems.filter((item) => item.year === year);
 
   const cardSummaries = cards.map((card) => {
     const cardPurchases = purchases.filter((purchase) => purchase.cardId === card.id);
-    const cardStatementItems = statementItems
+    const cardStatementItems = selectedYearStatementItems
       .filter((item) => item.name.toLocaleLowerCase('pt-BR') === card.name.toLocaleLowerCase('pt-BR'))
     const manualCardStatementItems = cardStatementItems.filter(
       (item) => !item.recurrenceGroupId?.startsWith(`CREDIT_CARD_AUTO:${card.id}:`)
+    );
+    const openCardStatementItems = statementItems.filter(
+      (item) =>
+        item.name.toLocaleLowerCase('pt-BR') === card.name.toLocaleLowerCase('pt-BR') &&
+        item.status !== PaymentStatus.PAGO &&
+        item.status !== PaymentStatus.CANCELADO
     );
     const monthlySummary = Array.from({ length: 12 }, (_, index) => {
       const summaryMonth = index + 1;
@@ -284,10 +288,7 @@ export async function listCreditCards(userId: string, filters: ListCreditCardsIn
     const otherAmount = Math.max(statementAmount - detailedAmount, 0);
     const yearStatementAmount = monthlySummary.reduce((sum, summary) => sum + summary.statementAmount, 0);
     const creditLimit = card.creditLimit ? toNumber(card.creditLimit) : null;
-    const manualUsedAmount = manualCardStatementItems
-      .filter((item) => item.status !== PaymentStatus.CANCELADO)
-      .reduce((sum, item) => sum + toNumber(item.amount), 0);
-    const usedAmount = cardPurchases.reduce((sum, purchase) => sum + activePurchaseAmount(purchase), 0) + manualUsedAmount;
+    const usedAmount = openCardStatementItems.reduce((sum, item) => sum + toNumber(item.amount), 0);
 
     return {
       ...serializeCard(card),
